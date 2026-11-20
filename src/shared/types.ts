@@ -1,0 +1,103 @@
+// Data model shared by the server, the editor, the in-page agent and the CLI.
+// `.playground/session.json` is exactly a `Session`.
+
+export type Step = { selector: string; text: string };
+
+export type Slide = {
+  id: string;
+  url: string; // path + search + hash on the frame origin, e.g. "/checkout.html?v=2"
+  label: string;
+  parent: string | null;
+  path: Step[]; // clicks on the parent slide that led here
+  thumb?: string; // served URL of the latest thumbnail
+};
+
+export type Neighbour = { selector: string; text: string; relation: string };
+
+export type InsertSpec = {
+  html: string; // outerHTML of the new element, carries data-pg-id
+  ref: string; // selector of the reference element
+  position: 'after' | 'append';
+};
+
+export type OpKind = 'style' | 'text' | 'move' | 'insert' | 'delete' | 'duplicate';
+
+export type Op = {
+  id: string;
+  slide: string;
+  kind: OpKind;
+  selector: string; // element the op acts on (for insert/duplicate: the new element)
+  element: string; // human description, e.g. 'button "Buy now"'
+  label: string; // human description of the change
+  prop?: string; // style: CSS property; move: "translate"; delete: "display"
+  before?: string; // computed/visible value before (for people and Claude)
+  after?: string;
+  beforeInline?: string; // exact inline value to restore on undo
+  insert?: InsertSpec;
+  neighbours?: Neighbour[];
+  coalesce?: boolean; // may merge with an immediately preceding op on the same target
+  at: number;
+};
+
+export type Reply = { author: 'you' | 'claude'; body: string; at: number };
+
+export type CommentType = 'comment' | 'change-request';
+export type CommentStatus = 'open' | 'sent' | 'applied' | 'resolved';
+
+export type Comment = {
+  id: string;
+  slide: string;
+  selector: string;
+  element: string;
+  type: CommentType;
+  body: string;
+  status: CommentStatus;
+  replies: Reply[];
+  at: number;
+};
+
+export type ResultState = 'applied' | 'question';
+export type Result = { item: string; state: ResultState; note: string };
+export type Verdict = 'confirmed' | 'reopened';
+
+export type Round = {
+  n: number;
+  status: 'submitted' | 'applied' | 'confirmed';
+  at: number;
+  ops: Op[];
+  comments: Comment[];
+  results: Result[];
+  review: Record<string, { verdict: Verdict; note?: string }>;
+  shots: Record<string, string>; // slide id -> served URL of the "before" image
+};
+
+export type Session = {
+  version: 1;
+  target: string;
+  targetKind: 'file' | 'url';
+  slides: Slide[];
+  ops: Op[];
+  undoPointer: number; // ops[0..undoPointer) are active, the rest are redo-able
+  comments: Comment[];
+  rounds: Round[];
+  rev: number; // bumped on every change
+};
+
+export type Action =
+  | { type: 'addSlide'; slide: Slide }
+  | { type: 'updateSlide'; id: string; patch: Partial<Slide> }
+  | { type: 'deleteSlide'; id: string }
+  | { type: 'addOp'; op: Op }
+  | { type: 'updateOp'; id: string; patch: Partial<Op> }
+  | { type: 'undo' }
+  | { type: 'redo' }
+  | { type: 'addComment'; comment: Comment }
+  | { type: 'reply'; id: string; reply: Reply }
+  | { type: 'setCommentStatus'; id: string; status: CommentStatus }
+  | { type: 'deleteComment'; id: string }
+  | { type: 'send'; at: number }
+  | { type: 'result'; round: number; result: Result }
+  | { type: 'finish'; round: number }
+  | { type: 'setShots'; round: number; shots: Record<string, string> }
+  | { type: 'review'; round: number; item: string; verdict: Verdict; note?: string; at: number }
+  | { type: 'confirmAll'; round: number };

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prototype · Save toast</title>
+  <style>
+    body { margin: 0; min-height: 100vh; background: #f6f6f4; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1b1b1b; }
+    .page { max-width: 720px; margin: 48px auto; padding: 0 24px; }
+    .card { padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    .btn { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: #1b1b1b; color: #fff; font: inherit; font-weight: 600; }
+    .toast { position: fixed; right: 24px; bottom: 88px; display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-radius: 10px; animation: in 220ms cubic-bezier(.23,1,.32,1); }
+    @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+    .quiet { background: #fff; box-shadow: 0 0 0 1px #e6e6e6; }
+    .bold { left: 50%; right: auto; transform: translateX(-50%); background: #1b1b1b; color: #fff; animation: none; }
+    .undo { border: 0; background: none; color: #2563eb; font: inherit; font-weight: 600; }
+    .bold .undo { color: #93c5fd; }
+    /* picker (from /prototype PICKER.md, trimmed) */
+    .proto-picker { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: rgba(10,10,10,.82); font: 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .proto-picker-item { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: rgba(255,255,255,.55); font: inherit; }
+    .proto-picker-item[data-active] { background: rgba(255,255,255,.12); color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="card">
+      <h2>Quarterly report</h2>
+      <p>Edited 2 minutes ago by Mara Santos.</p>
+      <button class="btn" id="save">Save</button>
+    </div>
+  </div>
+  <div id="stage"></div>
+  <nav class="proto-picker" aria-label="Prototype variants">
+    <button class="proto-picker-item">Quiet</button>
+    <button class="proto-picker-item">Bold</button>
+  </nav>
+  <script>
+    const variants = [
+      () => '<div class="toast quiet">Saved <button class="undo">Undo</button></div>',
+      () => '<div class="toast bold">All changes saved <button class="undo">Undo</button></div>',
+    ];
+    const items = [...document.querySelectorAll('.proto-picker-item')];
+    const stage = document.getElementById('stage');
+    function setActive(i) {
+      items.forEach((el, j) => el.toggleAttribute('data-active', j === i));
+      const url = new URL(location); url.searchParams.set('v', i + 1); history.replaceState(null, '', url);
+      stage.innerHTML = variants[i]();
+    }
+    items.forEach((el, i) => el.addEventListener('click', () => setActive(i)));
+    document.getElementById('save').addEventListener('click', () => setActive(items.findIndex((e) => e.hasAttribute('data-active'))));
+    const v = parseInt(new URLSearchParams(location.search).get('v'), 10);
+    setActive(v >= 1 && v <= variants.length ? v - 1 : 0);
+  </script>
+</body>
+</html>

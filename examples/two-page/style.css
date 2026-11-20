@@ -1,0 +1,28 @@
+:root { --ink: #1d1a17; --muted: #6f675f; --line: #e8e2da; --brand: #7a4b2a; --bg: #fbf8f4; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+a { color: inherit; }
+.nav { display: flex; align-items: center; gap: 32px; padding: 18px 40px; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; letter-spacing: .02em; text-decoration: none; }
+.nav nav { display: flex; gap: 20px; flex: 1; }
+.nav nav a, .cart { text-decoration: none; color: var(--muted); }
+.product { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; max-width: 1040px; margin: 40px auto; padding: 0 40px; }
+.photo { aspect-ratio: 4 / 5; border-radius: 16px; background: radial-gradient(circle at 30% 30%, #e9cfae, #b07a4c 60%, #5a3a22); }
+.eyebrow { margin: 0 0 8px; color: var(--brand); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+h1 { margin: 0 0 12px; font-size: 34px; line-height: 1.15; }
+.notes { color: var(--muted); }
+.price { font-size: 24px; font-weight: 600; }
+.price span { font-size: 15px; font-weight: 400; color: var(--muted); }
+.options { display: flex; gap: 16px; margin: 20px 0; }
+.options label, .pay label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+select, input { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; color: var(--ink); }
+.actions { display: flex; gap: 12px; margin-top: 8px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 20px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-weight: 600; text-decoration: none; }
+.btn.primary { border-color: var(--ink); background: var(--ink); color: #fff; }
+.hint { color: #2f6b3a; }
+.checkout { max-width: 560px; margin: 40px auto; padding: 0 24px; }
+.line { display: flex; justify-content: space-between; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.line p { margin: 2px 0 0; }
+.total { font-size: 18px; }
+.muted { color: var(--muted); }
+.pay { display: grid; gap: 14px; margin-top: 24px; }

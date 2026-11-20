@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Northwind Coffee · Checkout</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="index.html">Northwind</a>
+    <nav><a href="#">Coffee</a><a href="#">Gear</a><a href="#">Subscriptions</a></nav>
+    <a class="cart" href="checkout.html">Cart (1)</a>
+  </header>
+
+  <main class="checkout">
+    <h1>Checkout</h1>
+    <div class="line">
+      <div>
+        <b>Ethiopia Guji Hambela</b>
+        <p class="muted">250 g · Whole bean</p>
+      </div>
+      <span>₱980</span>
+    </div>
+    <div class="line"><span class="muted">Delivery (Metro Manila)</span><span>₱120</span></div>
+    <div class="line total"><b>Total</b><b>₱1,100</b></div>
+
+    <form class="pay" onsubmit="event.preventDefault(); document.getElementById('done').hidden = false;">
+      <label>Email <input type="email" placeholder="you@example.com" required /></label>
+      <label>Delivery address <input placeholder="Unit, street, barangay, city" required /></label>
+      <div class="actions">
+        <a class="btn" href="index.html">Back</a>
+        <button class="btn primary" type="submit">Pay ₱1,100</button>
+      </div>
+    </form>
+    <p id="done" class="hint" hidden>Order placed. A confirmation is on its way.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Northwind Coffee · Ethiopia Guji</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="index.html">Northwind</a>
+    <nav><a href="#">Coffee</a><a href="#">Gear</a><a href="#">Subscriptions</a></nav>
+    <a class="cart" href="checkout.html">Cart (1)</a>
+  </header>
+
+  <main class="product">
+    <div class="photo" aria-hidden="true"></div>
+    <section class="details">
+      <p class="eyebrow">Single origin · Light roast</p>
+      <h1>Ethiopia Guji Hambela</h1>
+      <p class="notes">Bergamot, white peach and honey. Washed, grown at 2,150 m by the Hambela smallholder co-op.</p>
+      <p class="price">₱980 <span>/ 250 g</span></p>
+
+      <div class="options">
+        <label>Grind
+          <select id="grind">
+            <option>Whole bean</option>
+            <option>Espresso</option>
+            <option>Pour-over</option>
+            <option>French press</option>
+          </select>
+        </label>
+        <label>Quantity <input id="qty" type="number" value="1" min="1" max="9" /></label>
+      </div>
+
+      <div class="actions">
+        <a id="buy" class="btn primary" href="checkout.html">Buy now</a>
+        <button id="save" class="btn" type="button">Save for later</button>
+      </div>
+      <p id="saved" class="hint" hidden>Saved. We'll remind you when it's back in season.</p>
+    </section>
+  </main>
+
+  <script>
+    document.getElementById('save').addEventListener('click', () => {
+      document.getElementById('saved').hidden = false;
+    });
+  </script>
+</body>
+</html>

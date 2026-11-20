@@ -51,7 +51,7 @@ export const COMMENT_LABEL: Record<CommentType, string> = {
   'change-request': 'Change request',
   behavior: 'Behavior',
 };
-export type CommentStatus = 'open' | 'sent' | 'applied' | 'resolved';
+export type CommentStatus = 'open' | 'sent' | 'applied' | 'resolved' | 'undone';
 
 export type Comment = {
   id: string;
@@ -66,8 +66,25 @@ export type Comment = {
 };
 
 export type ResultState = 'applied' | 'question';
-export type Result = { item: string; state: ResultState; note: string };
-export type Verdict = 'confirmed' | 'reopened';
+export type Result = {
+  item: string;
+  state: ResultState;
+  note: string;
+  patch?: string; // id of the recorded file changes (patches/<id>.json), for exact undo
+  linked?: string[]; // items built together and sharing that patch
+};
+export type Verdict = 'confirmed' | 'reopened' | 'undone';
+
+/** A request to undo one applied item, handed to Claude when an exact undo isn't possible. */
+export type UndoItem = {
+  id: string;
+  round: number; // round the change was applied in
+  item: string; // that round's item id
+  label: string; // what the item was
+  note: string; // Claude's note from when it applied it
+  patch?: string; // recorded file changes, if any
+  reason: string; // why the exact undo didn't happen
+};
 
 export type Round = {
   n: number;
@@ -78,6 +95,7 @@ export type Round = {
   results: Result[];
   review: Record<string, { verdict: Verdict; note?: string }>;
   shots: Record<string, string>; // slide id -> served URL of the "before" image
+  undo?: UndoItem[]; // undo requests Claude handles in this round
 };
 
 export type Session = {
@@ -90,6 +108,7 @@ export type Session = {
   undoPointer: number; // ops[0..undoPointer) are active, the rest are redo-able
   comments: Comment[];
   rounds: Round[];
+  pendingUndo?: UndoItem[]; // waiting for the round in flight to finish
   rev: number; // bumped on every change
 };
 
@@ -109,5 +128,7 @@ export type Action =
   | { type: 'result'; round: number; result: Result }
   | { type: 'finish'; round: number }
   | { type: 'setShots'; round: number; shots: Record<string, string> }
+  | { type: 'markUndone'; round: number; item: string; note: string; at: number }
+  | { type: 'requestUndo'; undo: UndoItem; at: number }
   | { type: 'review'; round: number; item: string; verdict: Verdict; note?: string; at: number }
   | { type: 'confirmAll'; round: number };

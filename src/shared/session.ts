@@ -1,4 +1,4 @@
-import type { Action, Comment, Op, Round, Session } from './types.ts';
+import type { Action, Comment, Op, Round, Session, UndoItem, Verdict } from './types.ts';
 
 export function emptySession(target: string, targetKind: 'file' | 'url'): Session {
   return {
@@ -35,8 +35,29 @@ export function canUndo(s: Session): boolean {
   return !openRound(s)?.ops.some((o) => o.id === last.id);
 }
 
-/** Every item id in a round, ops first. */
-export const roundItems = (r: Round): (Op | Comment)[] => [...r.ops, ...r.comments];
+/** Every item in a round: ops, then comments, then undo requests. */
+export const roundItems = (r: Round): (Op | Comment | UndoItem)[] => [...r.ops, ...r.comments, ...(r.undo ?? [])];
+
+/** An item that was applied by Claude and can still be undone. */
+export function canUndoItem(s: Session, round: number, item: string): boolean {
+  const r = s.rounds.find((x) => x.n === round);
+  if (!r || r.status === 'submitted') return false;
+  if (r.undo?.some((u) => u.id === item)) return false; // undo items themselves aren't undoable
+  const res = r.results.find((x) => x.item === item);
+  if (!res || res.state !== 'applied') return false;
+  if (r.review[item]?.verdict === 'undone') return false;
+  const pending = [...(s.pendingUndo ?? []), ...s.rounds.flatMap((x) => (x.status === 'submitted' ? (x.undo ?? []) : []))];
+  return !pending.some((u) => u.round === round && u.item === item);
+}
+
+/** The round and item a comment was last applied in, if any. */
+export function appliedIn(s: Session, commentId: string): { round: number; item: string } | null {
+  for (let i = s.rounds.length - 1; i >= 0; i--) {
+    const r = s.rounds[i];
+    if (r.comments.some((c) => c.id === commentId)) return { round: r.n, item: commentId };
+  }
+  return null;
+}
 
 /** Pure reducer. Returns the same object when nothing changed. */
 export function reduce(s: Session, a: Action): Session {
@@ -110,7 +131,9 @@ function apply(s: Session, a: Action): Session | null {
       if (openRound(s)) return null; // one round in flight at a time
       const ops = activeOps(s);
       const comments = s.comments.filter((c) => c.status === 'open');
-      if (ops.length === 0 && comments.length === 0) return null;
+      const undo = s.pendingUndo ?? [];
+      if (ops.length === 0 && comments.length === 0 && undo.length === 0) return null;
+      s.pendingUndo = [];
       for (const c of comments) c.status = 'sent';
       s.ops = ops;
       s.undoPointer = ops.length;
@@ -124,7 +147,25 @@ function apply(s: Session, a: Action): Session | null {
         results: [],
         review: {},
         shots: {},
+        undo,
       });
+      return s;
+    }
+    case 'markUndone': {
+      const r = s.rounds.find((x) => x.n === a.round);
+      if (!r) return null;
+      markUndone(s, r, a.item, a.note, a.at);
+      return s;
+    }
+    case 'requestUndo': {
+      const busy = [...(s.pendingUndo ?? []), ...s.rounds.flatMap((x) => (x.status === 'submitted' ? (x.undo ?? []) : []))];
+      if (busy.some((u) => u.round === a.undo.round && u.item === a.undo.item)) return null;
+      if (openRound(s)) {
+        s.pendingUndo = [...(s.pendingUndo ?? []), a.undo];
+        return s;
+      }
+      const n = s.rounds.reduce((m, r) => Math.max(m, r.n), 0) + 1;
+      s.rounds.push({ n, status: 'submitted', at: a.at, ops: [], comments: [], results: [], review: {}, shots: {}, undo: [a.undo] });
       return s;
     }
     case 'result': {
@@ -149,6 +190,12 @@ function apply(s: Session, a: Action): Session | null {
         const res = r.results.find((x) => x.item === rc.id);
         if (res) c.replies.push({ author: 'claude', body: res.note, at: Date.now() });
         c.status = res?.state === 'question' ? 'open' : 'applied';
+      }
+      // Undo requests Claude handled: the original item is now undone.
+      for (const u of r.undo ?? []) {
+        const res = r.results.find((x) => x.item === u.id);
+        const orig = s.rounds.find((x) => x.n === u.round);
+        if (res?.state === 'applied' && orig) markUndone(s, orig, u.item, `Undone by Claude: ${res.note}`, Date.now());
       }
       // Questions about ops come back as open change requests so they stay visible.
       for (const op of r.ops) {
@@ -194,7 +241,7 @@ function apply(s: Session, a: Action): Session | null {
   }
 }
 
-function reviewItem(s: Session, r: Round, item: string, verdict: 'confirmed' | 'reopened', note: string | undefined, at: number) {
+function reviewItem(s: Session, r: Round, item: string, verdict: Verdict, note: string | undefined, at: number) {
   r.review[item] = { verdict, note };
   const c = s.comments.find((x) => x.id === item);
   if (c) {
@@ -219,6 +266,21 @@ function reviewItem(s: Session, r: Round, item: string, verdict: 'confirmed' | '
       at,
     });
   }
+}
+
+/** Mark an applied item (and anything built together with it) as undone. */
+function markUndone(s: Session, r: Round, item: string, note: string, at: number) {
+  const res = r.results.find((x) => x.item === item);
+  const ids = res?.linked?.length ? res.linked : [item];
+  for (const id of ids) {
+    r.review[id] = { verdict: 'undone', note };
+    const c = s.comments.find((x) => x.id === id);
+    if (c) {
+      c.status = 'undone';
+      c.replies.push({ author: 'claude', body: note, at });
+    }
+  }
+  closeIfReviewed(r);
 }
 
 function closeIfReviewed(r: Round) {

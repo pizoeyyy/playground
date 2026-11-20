@@ -25,7 +25,7 @@ The tool ships inside this skill folder as `dist/cli.js` (a Node script, no depe
 1. **Never edit source until a round is submitted** (Save and send, or `apply`). Exploring, commenting and dragging only touch the session data (kept in `~/.playground/sessions/`, outside the project).
 2. **Interpret intent, not pixels.** Recorded moves and resizes are rough hints. Never write `position: absolute`, `translate`, magic margins or one-off pixel widths to reproduce a drag (see Auto-align).
 3. **Never guess.** If an item is ambiguous or can't be mapped to the source, record it as a `question`.
-4. **Snapshot before editing** with `playground snapshot`, so the round can be rolled back.
+4. **Snapshot before editing, then one item at a time.** `pg snapshot` every file you might touch (new files too), then finish each item and record its `pg result` before starting the next. That is how each change gets recorded on its own, so the user can undo it exactly later.
 5. **Write results through the CLI**, never by editing `session.json` by hand: the CLI goes through the running server so the editor updates live.
 6. **Report honestly.** `applied` is Claude's claim; the developer's Confirm is the proof.
 
@@ -52,8 +52,8 @@ If `SKILL_DIR/dist/cli.js` is missing, the skill was copied without its tool: te
 | `pg serve <file \| http://localhost:N> [--root PROJECT]` | Start the editor. `--root` is the project folder for URL targets (default: current folder) |
 | `pg wait --session DIR` | Blocks until a round is sent, prints it, exits 0. Exits 3 with `STOPPED` if the server is gone |
 | `pg show --session DIR [--round N] [--json]` | Print a round |
-| `pg snapshot --session DIR --round N <files...>` | Copy files into the session's `revisions/rN/` before editing |
-| `pg result --session DIR --round N --item ID --state applied\|question --note "..."` | Record one item's outcome |
+| `pg snapshot --session DIR --round N <files...>` | Before editing: copy the files and start tracking them (files you will create count too) |
+| `pg result --session DIR --round N --item ID[,ID] --state applied\|question --note "..."` | Record one item's outcome, plus whatever changed in the tracked files since the last result |
 | `pg finish --session DIR --round N` | Mark the round applied; the editor reloads and shows the review |
 | `pg status --session DIR` | Per-slide summary |
 | `pg stop --session DIR` | Stop the server |
@@ -105,7 +105,19 @@ The `wait` task's output is the round: slides, how each slide was reached, and e
 
 An inserted element and a BEHAVIOR on it are one piece of work: build the element and its interaction together, then write a `pg result` for **each** of the two item ids.
 
-Order: `pg snapshot` the files you'll touch, edit them, then one `pg result` per item, then `pg finish`. Notes are one plain sentence naming the file and what changed. Use `--state question` with the question as the note when you can't proceed. Questions come back to the user as open change requests.
+Order:
+1. `pg snapshot` every file you might touch in this round, including files you'll create. You can run it again later to track more.
+2. For each item, in turn: make that item's edits, then immediately `pg result` for it. Don't start the next item first. The CLI saves exactly what changed since the previous result as this item's change, which lets the user undo it on its own.
+3. Items you build together (an inserted popup and the BEHAVIOR on it) get one result: `--item id1,id2`.
+4. `pg finish`.
+
+ Notes are one plain sentence naming the file and what changed. Use `--state question` with the question as the note when you can't proceed. Questions come back to the user as open change requests.
+
+### Undo requests
+
+The user can right-click anything Claude applied and pick **Undo change on this comment** / **Undo this change**. The editor first undoes it exactly from the recorded change. You only get an **UNDO** item when that wasn't possible: the item had no recorded change, or a later change edited the same lines. The item says which earlier item it was, what you did then, why the exact undo failed, and where the recorded before/after file contents are (`patches/<id>.json` in the session folder).
+
+Revert **only that item's change**, keeping every other item's change (including the later one that overlapped). Follow the same order: `pg snapshot`, edit, `pg result --item <UNDO id>`, `pg finish`. The original item then shows as undone. If you can't separate the two changes cleanly, use `--state question` and say what would be lost.
 
 ### 4. Auto-align
 

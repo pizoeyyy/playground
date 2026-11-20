@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeOps, canUndo, emptySession, pendingCount, reduce } from '../src/shared/session.ts';
+import { activeOps, canUndo, canUndoItem, emptySession, pendingCount, reduce } from '../src/shared/session.ts';
 import type { Comment, Op, Session } from '../src/shared/types.ts';
 
 const op = (id: string, extra: Partial<Op> = {}): Op => ({
@@ -130,6 +130,50 @@ describe('rounds', () => {
     expect(reduce(s, { type: 'undo' })).toBe(s);
     const t = reduce(s, { type: 'addOp', op: op('b') });
     expect(canUndo(t)).toBe(true); // a new edit for the next round is fine
+  });
+
+  it('undoing an applied item marks it and anything built with it', () => {
+    let s = run(
+      emptySession('/x.html', 'file'),
+      { type: 'addOp', op: op('o1', { kind: 'insert', label: 'Added a popup' }) },
+      { type: 'addComment', comment: comment('c1', { type: 'behavior', body: 'Opens on Buy now' }) },
+      { type: 'send', at: 1 },
+      { type: 'result', round: 1, result: { item: 'o1', state: 'applied', note: 'Popup', patch: 'r1-o1+c1', linked: ['o1', 'c1'] } },
+      { type: 'result', round: 1, result: { item: 'c1', state: 'applied', note: 'Popup', patch: 'r1-o1+c1', linked: ['o1', 'c1'] } },
+      { type: 'finish', round: 1 },
+    );
+    expect(canUndoItem(s, 1, 'c1')).toBe(true);
+    s = reduce(s, { type: 'markUndone', round: 1, item: 'c1', note: 'Undone: restored checkout.html', at: 2 });
+    expect(s.rounds[0].review).toMatchObject({ o1: { verdict: 'undone' }, c1: { verdict: 'undone' } });
+    expect(s.comments[0].status).toBe('undone');
+    expect(s.rounds[0].status).toBe('confirmed');
+    expect(canUndoItem(s, 1, 'c1')).toBe(false);
+  });
+
+  it('undo requests for Claude open a round, or wait for the one in flight', () => {
+    const base = run(
+      emptySession('/x.html', 'file'),
+      { type: 'addComment', comment: comment('c1') },
+      { type: 'send', at: 1 },
+      { type: 'result', round: 1, result: { item: 'c1', state: 'applied', note: 'Made it green' } },
+      { type: 'finish', round: 1 },
+    );
+    const undo = { id: 'u1', round: 1, item: 'c1', label: 'Make it green', note: 'Made it green', reason: 'no recorded file changes for it' };
+    let s = reduce(base, { type: 'requestUndo', undo, at: 2 });
+    expect(s.rounds[1]).toMatchObject({ n: 2, status: 'submitted', undo: [undo] });
+    expect(canUndoItem(s, 1, 'c1')).toBe(false); // already with Claude
+    expect(reduce(s, { type: 'requestUndo', undo: { ...undo, id: 'u2' }, at: 3 })).toBe(s); // no duplicates
+    s = run(s, { type: 'result', round: 2, result: { item: 'u1', state: 'applied', note: 'Back to grey' } }, { type: 'finish', round: 2 });
+    expect(s.rounds[0].review.c1).toMatchObject({ verdict: 'undone' });
+    expect(s.comments[0].status).toBe('undone');
+
+    // While another round is in flight, the request queues and goes with the next send.
+    let t = run(base, { type: 'addComment', comment: comment('c2') }, { type: 'send', at: 2 });
+    t = reduce(t, { type: 'requestUndo', undo, at: 3 });
+    expect(t.pendingUndo).toHaveLength(1);
+    t = run(t, { type: 'finish', round: 2 }, { type: 'send', at: 4 });
+    expect(t.rounds[2].undo).toEqual([undo]);
+    expect(t.pendingUndo).toEqual([]);
   });
 
   it('deleting a slide removes its ops and comments and fixes the pointer', () => {

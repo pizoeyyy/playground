@@ -14,6 +14,7 @@ import {
   writeSession,
 } from './store.ts';
 import { describeRound, describeStatus } from '../shared/describe.ts';
+import { recordItemPatch, writeCheckpoint } from './patches.ts';
 import { latestRound, openRound, reduce } from '../shared/session.ts';
 import type { Action, ResultState, Session } from '../shared/types.ts';
 
@@ -24,7 +25,7 @@ const HELP = `playground — review editor for HTML prototypes and live apps
   playground show     [--session DIR] [--round N] [--json]
   playground status   [--session DIR]
   playground snapshot [--session DIR] --round N <files...>
-  playground result   [--session DIR] --round N --item ID --state applied|question --note "..."
+  playground result   [--session DIR] --round N --item ID[,ID] --state applied|question --note "..."
   playground finish   [--session DIR] --round N
   playground stop     [--session DIR]
 
@@ -199,9 +200,14 @@ async function main() {
       const root = s?.root ?? process.cwd();
       const n = Number(flags.round ?? die('--round is required'));
       const dest = path.join(dir, 'revisions', `r${n}`);
+      // Files that don't exist yet can be tracked too (Claude may create them).
+      writeCheckpoint(dir, n, pos.map(localPath));
       for (const f of pos) {
         const src = localPath(f);
-        if (!fs.existsSync(src)) die(`No such file: ${src}`);
+        if (!fs.existsSync(src)) {
+          console.log(`tracking new file ${src}`);
+          continue;
+        }
         const rel = path.relative(root, src);
         const to = path.join(dest, rel.startsWith('..') || path.isAbsolute(rel) ? path.basename(src) : rel);
         fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -214,11 +220,17 @@ async function main() {
       const dir = dataDirArg(flags);
       const state = flags.state as ResultState;
       if (state !== 'applied' && state !== 'question') die('--state must be applied or question');
-      const item = typeof flags.item === 'string' ? flags.item : die('--item is required');
+      const items = (typeof flags.item === 'string' ? flags.item : die('--item is required')).split(',').map((x) => x.trim()).filter(Boolean);
       const note = typeof flags.note === 'string' ? flags.note : die('--note is required');
       const n = Number(flags.round ?? die('--round is required'));
-      await dispatch(dir, { type: 'result', round: n, result: { item, state, note } });
-      console.log(`recorded ${item}: ${state}`);
+      // Whatever changed in the snapshotted files since the last result belongs to these items.
+      const patch = recordItemPatch(dir, n, items);
+      const linked = items.length > 1 ? items : undefined;
+      for (const item of items) {
+        await dispatch(dir, { type: 'result', round: n, result: { item, state, note, patch: patch?.id, linked } });
+      }
+      const changed = patch ? `patch: ${patch.files.length} file(s)` : 'no file changes recorded';
+      console.log(`recorded ${items.join(', ')}: ${state} (${changed})`);
       return;
     }
     case 'finish': {

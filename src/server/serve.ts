@@ -3,7 +3,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { filesSignature, proxyFrame, staticFrame } from './frame.ts';
 import { LAST_FILE, serverFile, Store, writeFileAtomic } from './store.ts';
-import { openRound } from '../shared/session.ts';
+import { newId, openRound } from '../shared/session.ts';
+import { readPatch, undoPatch } from './patches.ts';
 import type { Action } from '../shared/types.ts';
 
 export type ServeOptions = {
@@ -140,6 +141,29 @@ export async function serve(o: ServeOptions) {
           shots[id] = `/files/shots/${name}`;
         }
         return json(res, 200, { session: store.dispatch({ type: 'setShots', round: round.n, shots }) });
+      }
+      if (req.method === 'POST' && p === '/api/undo') {
+        const { round, item } = JSON.parse(await readBody(req)) as { round: number; item: string };
+        const r = store.session.rounds.find((x) => x.n === round);
+        const result = r?.results.find((x) => x.item === item);
+        if (!r || !result) return json(res, 404, { error: 'no such applied item' });
+        const what = r.ops.find((o) => o.id === item)?.label ?? r.comments.find((c) => c.id === item)?.body ?? item;
+        // Exact first: restore the lines this item changed.
+        const patch = result.patch ? readPatch(dir, result.patch) : null;
+        const outcome = patch ? undoPatch(patch) : { ok: false as const, reason: 'no recorded file changes for it' };
+        if (outcome.ok) {
+          const names = outcome.files.map((f) => path.basename(f)).join(', ');
+          const session = store.dispatch({ type: 'markUndone', round, item, note: `Undone: restored ${names}`, at: Date.now() });
+          broadcast('reload', { at: Date.now() });
+          return json(res, 200, { via: 'exact', files: outcome.files, session });
+        }
+        // Otherwise Claude reverts it by hand.
+        const session = store.dispatch({
+          type: 'requestUndo',
+          at: Date.now(),
+          undo: { id: newId('u'), round, item, label: what, note: result.note, patch: result.patch, reason: outcome.reason },
+        });
+        return json(res, 200, { via: 'claude', reason: outcome.reason, session });
       }
       json(res, 404, { error: 'not found' });
     } catch (e) {

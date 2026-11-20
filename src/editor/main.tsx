@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ItemMenu } from './ItemMenu.tsx';
 import { CompareModal, Panel } from './Panel.tsx';
 import { SlidesRail } from './SlidesRail.tsx';
 import { Stage } from './Stage.tsx';
@@ -36,6 +37,7 @@ function App() {
         <Panel />
       </div>
       <CompareModal />
+      <ItemMenu />
       <div className="toast" role="status" data-show={!!toast || undefined}>{toast}</div>
     </div>
   );

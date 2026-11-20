@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { latestRound, roundItems } from '../shared/session.ts';
-import { COMMENT_LABEL, type Comment, type Op, type Round } from '../shared/types.ts';
+import { COMMENT_LABEL, type Comment, type Op, type Round, type UndoItem } from '../shared/types.ts';
 import { IconCheck } from './icons.tsx';
-import { act, focusComment, getState, openComposer, setState, toAgent, useStore } from './store.ts';
+import { act, focusComment, getState, openComposer, openItemMenu, setState, toAgent, useStore } from './store.ts';
 
 export function Panel() {
   const tab = useStore((s) => s.tab);
@@ -236,7 +236,12 @@ function Comments() {
 
 function CommentCard({ c, n }: { c: Comment; n: number }) {
   return (
-    <button className="card" data-status={c.status} onClick={() => focusComment(c.id)}>
+    <button
+      className="card"
+      data-status={c.status}
+      onClick={() => focusComment(c.id)}
+      onContextMenu={(e) => openItemMenu(e, c.id, true, `${COMMENT_LABEL[c.type]} ${n}: ${c.body}`)}
+    >
       <div className="card-head">
         <span className="pin-dot" data-type={c.type}>{n}</span>
         <span className="kind">{COMMENT_LABEL[c.type]}</span>
@@ -255,6 +260,9 @@ function CommentCard({ c, n }: { c: Comment; n: number }) {
 
 // ---------------- the review loop ----------------
 
+const itemText = (it: Op | Comment | UndoItem) =>
+  'kind' in it ? it.label : 'body' in it ? `“${it.body}”` : `Undo: ${it.label}`;
+
 function RoundCard({ round }: { round: Round }) {
   const [reopening, setReopening] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -264,7 +272,7 @@ function RoundCard({ round }: { round: Round }) {
         <span className="dot" aria-hidden />
         <div>
           <b>Round {round.n} sent</b>
-          <span className="muted"> · Claude is working on {round.ops.length + round.comments.length} item(s)…</span>
+          <span className="muted"> · Claude is working on {roundItems(round).length} item(s)…</span>
         </div>
       </div>
     );
@@ -286,15 +294,20 @@ function RoundCard({ round }: { round: Round }) {
           const res = round.results.find((r) => r.item === it.id);
           const verdict = round.review[it.id]?.verdict;
           return (
-            <li key={it.id} data-verdict={verdict}>
-              <div className="what">{'kind' in it ? (it as Op).label : `“${(it as Comment).body}”`}</div>
+            <li
+              key={it.id}
+              data-verdict={verdict}
+              onContextMenu={(e) => openItemMenu(e, it.id, 'body' in it, itemText(it), round.n)}
+              title="Right-click to undo this change"
+            >
+              <div className="what">{itemText(it)}</div>
               {res && (
                 <div className="note" data-state={res.state}>
                   <b>Claude</b> {res.state === 'question' ? '(question) ' : ''}{res.note}
                 </div>
               )}
               {verdict ? (
-                <div className="verdict">{verdict === 'confirmed' ? 'Confirmed' : 'Reopened'}</div>
+                <div className="verdict" data-verdict={verdict}>{verdict === 'confirmed' ? 'Confirmed' : verdict === 'undone' ? 'Undone' : 'Reopened'}</div>
               ) : reopening === it.id ? (
                 <div className="reopen">
                   <input autoFocus value={note} placeholder="What's still wrong?" onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => {

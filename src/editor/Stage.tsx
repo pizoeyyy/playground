@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { appliedIn, canUndoItem } from '../shared/session.ts';
 import { COMMENT_LABEL, type Comment, type CommentType } from '../shared/types.ts';
 import {
   act,
   addComment,
   closeMenu,
+  openItemMenu,
+  undoChange,
   toAgent,
   DEVICE_WIDTH,
   getState,
@@ -120,6 +123,7 @@ function Overlay({ scale, width }: { scale: number; width: number }) {
             }}
             title={`${COMMENT_LABEL[c.type]}: ${c.body}`}
             onClick={() => (openThread === c.id ? setState({ openThread: null }) : focusComment(c.id))}
+            onContextMenu={(e) => openItemMenu(e, c.id, true, `${COMMENT_LABEL[c.type]} ${n}: ${c.body}`)}
           >
             {n}
           </button>
@@ -283,6 +287,8 @@ function ComposerForm({ initial, element }: { initial: CommentType; element: str
 
 export function Thread({ comment: c, n }: { comment: Comment; n: number }) {
   const [reply, setReply] = useState('');
+  const session = useStore((s) => s.session);
+  const where = session ? appliedIn(session, c.id) : null;
   const send = () => {
     if (!reply.trim()) return;
     act({ type: 'reply', id: c.id, reply: { author: 'you', body: reply.trim(), at: Date.now() } });
@@ -318,6 +324,11 @@ export function Thread({ comment: c, n }: { comment: Comment; n: number }) {
           Delete
         </button>
         <span className="grow" />
+        {where && session && canUndoItem(session, where.round, c.id) && (
+          <button className="ghost" title="Undo the change Claude made for this comment" onClick={() => undoChange(where.round, c.id)}>
+            Undo change
+          </button>
+        )}
         {c.status !== 'resolved' && (
           <button className="ghost" onClick={() => { act({ type: 'setCommentStatus', id: c.id, status: 'resolved' }); setState({ openThread: null }); }}>
             Resolve

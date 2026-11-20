@@ -11,6 +11,7 @@ A Figma-like review editor for HTML, built for Claude Code. Open a `/prototype` 
   - **Request change…** and **Comment…** pin a note to the element.
 - **Slides.** When a click opens another page, that page becomes slide 2. The slide records which button led there and can replay the path.
 - **Save and send.** Edits and comments go to Claude as a numbered round. Claude edits the real source, turning rough drags and sizes into clean layout, and the editor reloads the revision. You **Confirm** or **Reopen** each item, with a side-by-side of your edits and Claude's result.
+- **Undo one change Claude made.** Right-click a comment pin, a comment card or a revision item → **Undo change on this comment** (or **Undo this change**). Claude's changes are recorded item by item, so the undo restores exactly the lines that item changed, even when later items edited the same file. Only when a later change touched those same lines does the undo go to Claude to untangle by hand.
 
 ## Install
 

@@ -41,6 +41,13 @@ export function describeRound(s: Session, r: Round): string {
     for (const c of r.comments.filter((c) => c.slide === id)) out.push(indent(describeComment(c)));
     out.push('');
   }
+  for (const u of r.undo ?? []) {
+    out.push(`UNDO [${u.id}] the change made for round ${u.round} item ${u.item}: "${u.label}"`);
+    out.push(`    what you did then: "${u.note}"`);
+    out.push(`    exact undo didn't work: ${u.reason}`);
+    if (u.patch) out.push(`    recorded file changes: patches/${u.patch}.json in the session folder (before/after of each file)`);
+    out.push('');
+  }
   if (r.results.length) {
     out.push('RESULTS');
     for (const x of r.results) out.push(`  [${x.item}] ${x.state}: ${x.note}`);

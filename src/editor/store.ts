@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { activeOps, canUndo, newId, reduce } from '../shared/session.ts';
+import { activeOps, appliedIn, canUndo, newId, reduce } from '../shared/session.ts';
 import { PG, type ElementInfo, type FromAgent, type Mode, type Rect, type ToAgent } from '../shared/protocol.ts';
 import type { ComponentKind } from '../shared/components.ts';
 import type { Action, CommentType, Op, Session, Slide, Step } from '../shared/types.ts';
@@ -9,6 +9,8 @@ export const DEVICE_WIDTH: Record<Device, number> = { desktop: 1280, tablet: 768
 
 export type Composer = { kind: CommentType; selector: string; element: string; rect: Rect; slide: string };
 export type Menu = Extract<FromAgent, { type: 'menu' }>;
+/** Right-click menu on a comment or revision item. round = where Claude applied it (null: not yet). */
+export type ItemMenuState = { x: number; y: number; round: number | null; item: string; comment: boolean; title: string };
 
 export type State = {
   session: Session | null;
@@ -25,6 +27,7 @@ export type State = {
   selected: ElementInfo | null;
   composer: Composer | null;
   menu: Menu | null;
+  itemMenu: ItemMenuState | null;
   openThread: string | null;
   rects: Record<string, Rect | null>;
   tab: 'inspect' | 'comments';
@@ -50,6 +53,7 @@ let state: State = {
   selected: null,
   composer: null,
   menu: null,
+  itemMenu: null,
   openThread: null,
   rects: {},
   tab: 'inspect',
@@ -356,6 +360,31 @@ export function onAgentMessage(e: MessageEvent) {
   }
 }
 
+export function openItemMenu(e: { clientX: number; clientY: number; preventDefault(): void }, item: string, comment: boolean, title: string, round?: number) {
+  e.preventDefault();
+  const s = state.session;
+  const where = round !== undefined ? { round, item } : s && comment ? appliedIn(s, item) : null;
+  setState({ itemMenu: { x: e.clientX, y: e.clientY, round: where?.round ?? null, item, comment, title }, menu: null });
+}
+
+export const closeItemMenu = () => state.itemMenu && setState({ itemMenu: null });
+
+/** Undo one change Claude made: exactly if the server can, otherwise as an undo request to Claude. */
+export async function undoChange(round: number, item: string) {
+  try {
+    const r = await fetch('/api/undo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ round, item }) });
+    const body = (await r.json()) as { via?: 'exact' | 'claude'; reason?: string; session?: Session; error?: string };
+    if (body.session) onServerSession(body.session);
+    if (!r.ok) return toast(body.error ?? 'Could not undo');
+    if (body.via === 'exact') {
+      toast('Undone');
+      reloadFrame();
+    } else toast(`Sent to Claude to undo (${body.reason})`);
+  } catch {
+    toast('Lost connection to the playground server');
+  }
+}
+
 export function closeMenu() {
   if (!state.menu) return;
   setState({ menu: null });
@@ -474,6 +503,7 @@ export function handleKey(key: string, ctrl: boolean, shift: boolean) {
   if (ctrl && k === 'enter') return saveAndSend();
   if (ctrl) return;
   if (key === 'Escape') {
+    if (state.itemMenu) return closeItemMenu();
     if (state.menu) return closeMenu();
     if (state.palette) return setState({ palette: false });
     if (state.composer || state.openThread) return setState({ composer: null, openThread: null });

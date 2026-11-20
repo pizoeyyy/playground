@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { latestRound, roundItems } from '../shared/session.ts';
-import type { Comment, Op, Round } from '../shared/types.ts';
+import { COMMENT_LABEL, type Comment, type Op, type Round } from '../shared/types.ts';
 import { IconCheck } from './icons.tsx';
 import { act, focusComment, getState, openComposer, setState, toAgent, useStore } from './store.ts';
 
@@ -129,6 +129,7 @@ function Inspector() {
       <div className="row wrap">
         <button className="chip" onClick={() => toAgent({ type: 'click', selector: s })}>Click it</button>
         <button className="chip" onClick={() => openComposer('comment')}>Comment</button>
+        <button className="chip behavior" onClick={() => openComposer('behavior')}>Describe behavior</button>
         <button className="chip accent" onClick={() => openComposer('change-request')}>Request change</button>
       </div>
 
@@ -172,6 +173,7 @@ function Shortcuts() {
   const rows: [string, string][] = [
     ['V', 'Select and move'],
     ['I', 'Interact with the page'],
+    ['A', 'Add menu (card, dropdown, popup, ...)'],
     ['B', 'Add a button'],
     ['C', 'Comment'],
     ["'", 'Grid'],
@@ -210,7 +212,7 @@ function Comments() {
           <button data-active={filter === 'all' || undefined} onClick={() => setFilter('all')}>All</button>
         </div>
       </div>
-      {list.length === 0 && <p className="muted">No comments yet. Press C, or right-click an element → Request change.</p>}
+      {list.length === 0 && <p className="muted">No comments yet. Press C, or right-click an element → Describe behavior / Request change.</p>}
       {session.slides.map((sl, i) => {
         const items = list.filter((c) => c.slide === sl.id);
         if (!items.length) return null;
@@ -232,7 +234,7 @@ function CommentCard({ c, n }: { c: Comment; n: number }) {
     <button className="card" data-status={c.status} onClick={() => focusComment(c.id)}>
       <div className="card-head">
         <span className="pin-dot" data-type={c.type}>{n}</span>
-        <span className="kind">{c.type === 'change-request' ? 'Change request' : 'Comment'}</span>
+        <span className="kind">{COMMENT_LABEL[c.type]}</span>
         <span className="status" data-status={c.status}>{c.status}</span>
       </div>
       <div className="on">{c.element}</div>

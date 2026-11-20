@@ -15,6 +15,7 @@ export type Slide = {
 export type Neighbour = { selector: string; text: string; relation: string };
 
 export type InsertSpec = {
+  kind?: string; // component kind, e.g. "card"
   html: string; // outerHTML of the new element, carries data-pg-id
   ref: string; // selector of the reference element
   position: 'after' | 'append';
@@ -41,7 +42,14 @@ export type Op = {
 
 export type Reply = { author: 'you' | 'claude'; body: string; at: number };
 
-export type CommentType = 'comment' | 'change-request';
+/** `behavior` describes what something should do when used ("on click, open the confirm popup"). */
+export type CommentType = 'comment' | 'change-request' | 'behavior';
+
+export const COMMENT_LABEL: Record<CommentType, string> = {
+  comment: 'Comment',
+  'change-request': 'Change request',
+  behavior: 'Behavior',
+};
 export type CommentStatus = 'open' | 'sent' | 'applied' | 'resolved';
 
 export type Comment = {

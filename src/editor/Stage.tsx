@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Comment, CommentType } from '../shared/types.ts';
+import { COMMENT_LABEL, type Comment, type CommentType } from '../shared/types.ts';
 import {
   act,
   addComment,
   closeMenu,
   toAgent,
   DEVICE_WIDTH,
+  setMode,
   focusComment,
   setIframe,
   setState,
@@ -46,12 +47,32 @@ export function Stage() {
               width={width}
               height={height}
             />
+            <PlaceLayer scale={scale} />
             <Overlay scale={scale} width={width} />
           </div>
         </div>
       )}
       {scale < 1 && <div className="zoom">{Math.round(scale * 100)}%</div>}
     </main>
+  );
+}
+
+/** Catches the click that places a new component or comment, in the editor's own event loop. */
+function PlaceLayer({ scale }: { scale: number }) {
+  const mode = useStore((s) => s.mode);
+  const addKind = useStore((s) => s.addKind);
+  if (mode !== 'add' && mode !== 'comment') return null;
+  return (
+    <div
+      className="place-layer"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        toAgent({ type: 'place', x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale, what: mode, kind: addKind });
+        setMode('select');
+      }}
+    />
   );
 }
 
@@ -89,7 +110,7 @@ function Overlay({ scale, width }: { scale: number; width: number }) {
               top: Math.max(4, r.y - 24 * inv),
               transform: `scale(${inv})`,
             }}
-            title={`${c.type === 'change-request' ? 'Change request' : 'Comment'}: ${c.body}`}
+            title={`${COMMENT_LABEL[c.type]}: ${c.body}`}
             onClick={() => (openThread === c.id ? setState({ openThread: null }) : focusComment(c.id))}
           >
             {n}
@@ -141,6 +162,7 @@ function ContextMenu({ scale, width }: { scale: number; width: number }) {
   const items: ({ label: string; hint?: string; danger?: boolean; run: () => void } | 'sep')[] = [
     { label: menu.clickable ? 'Click this button' : 'Click this element', run: run(() => toAgent({ type: 'click', selector: s })) },
     'sep',
+    { label: 'Describe behavior…', run: run(() => toAgent({ type: 'compose', selector: s, kind: 'behavior' })) },
     { label: 'Request change…', run: run(() => toAgent({ type: 'compose', selector: s, kind: 'change-request' })) },
     { label: 'Comment…', hint: 'C', run: run(() => toAgent({ type: 'compose', selector: s, kind: 'comment' })) },
     'sep',
@@ -199,6 +221,12 @@ function Popover({ rect, scale, width, children }: { rect: { x: number; y: numbe
   );
 }
 
+const PLACEHOLDER: Record<CommentType, string> = {
+  behavior: 'When someone uses this, what should happen? e.g. "On click, open the confirm popup. Cancel closes it."',
+  'change-request': 'What should change?',
+  comment: 'What do you think, or what does this do?',
+};
+
 function ComposerForm({ initial, element }: { initial: CommentType; element: string }) {
   const [kind, setKind] = useState<CommentType>(initial);
   const [body, setBody] = useState('');
@@ -212,25 +240,18 @@ function ComposerForm({ initial, element }: { initial: CommentType; element: str
       }}
     >
       <div className="seg" role="radiogroup" aria-label="Type">
-        <button type="button" role="radio" aria-checked={kind === 'comment'} data-active={kind === 'comment' || undefined} onClick={() => setKind('comment')}>
-          Comment
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={kind === 'change-request'}
-          data-active={kind === 'change-request' || undefined}
-          onClick={() => setKind('change-request')}
-        >
-          Request change
-        </button>
+        {(['behavior', 'change-request', 'comment'] as CommentType[]).map((t) => (
+          <button key={t} type="button" role="radio" aria-checked={kind === t} data-active={kind === t || undefined} onClick={() => setKind(t)}>
+            {t === 'behavior' ? 'Behavior' : t === 'change-request' ? 'Change' : 'Note'}
+          </button>
+        ))}
       </div>
       <div className="on">on {element}</div>
       <textarea
         autoFocus
         rows={3}
         value={body}
-        placeholder={kind === 'change-request' ? 'What should change?' : 'What does this do, or what do you think?'}
+        placeholder={PLACEHOLDER[kind]}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -264,7 +285,7 @@ export function Thread({ comment: c, n }: { comment: Comment; n: number }) {
     <div className="thread">
       <div className="thread-head">
         <span className="pin-dot" data-type={c.type}>{n}</span>
-        <span className="kind">{c.type === 'change-request' ? 'Change request' : 'Comment'}</span>
+        <span className="kind">{COMMENT_LABEL[c.type]}</span>
         <span className="status" data-status={c.status}>{c.status}</span>
         <button className="x" aria-label="Close" onClick={() => setState({ openThread: null })}>×</button>
       </div>

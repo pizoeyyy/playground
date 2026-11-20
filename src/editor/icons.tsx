@@ -6,8 +6,8 @@ export const IconSelect = () => (
 export const IconInteract = () => (
   <svg {...S}><path d="M6 8.5V3.2a1.2 1.2 0 012.4 0v4.3M8.4 7V6a1.2 1.2 0 012.4 0v1.6M10.8 7.4a1.2 1.2 0 012.2.7v2.4a4 4 0 01-4 4H8.3a3.6 3.6 0 01-2.8-1.4L3.2 10a1.1 1.1 0 011.7-1.4L6 9.7" /></svg>
 );
-export const IconButton = () => (
-  <svg {...S}><rect x="2" y="4.5" width="12" height="7" rx="2" /><path d="M8 6.5v3M6.5 8h3" /></svg>
+export const IconAdd = () => (
+  <svg {...S}><rect x="2.5" y="2.5" width="11" height="11" rx="2.5" /><path d="M8 5.5v5M5.5 8h5" /></svg>
 );
 export const IconComment = () => (
   <svg {...S}><path d="M8 13.5a5.5 5.5 0 10-5.1-3.4L2.5 13.5l3.4-.4A5.5 5.5 0 008 13.5z" /></svg>

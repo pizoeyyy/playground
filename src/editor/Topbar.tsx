@@ -1,14 +1,66 @@
+import { useEffect, useRef } from 'react';
+import { COMPONENTS, componentLabel } from '../shared/components.ts';
 import { canUndo, openRound, pendingCount } from '../shared/session.ts';
 import type { Mode } from '../shared/protocol.ts';
-import { IconButton, IconComment, IconGrid, IconInteract, IconRedo, IconSelect, IconSend, IconUndo } from './icons.tsx';
-import { type Device, redo, saveAndSend, setMode, setState, toggleGrid, undo, useStore } from './store.ts';
+import { IconAdd, IconComment, IconGrid, IconInteract, IconRedo, IconSelect, IconSend, IconUndo } from './icons.tsx';
+import { type Device, redo, saveAndSend, setMode, setState, startAdd, toggleGrid, undo, useStore } from './store.ts';
 
-const TOOLS: { mode: Mode; label: string; key: string; Icon: () => React.JSX.Element }[] = [
-  { mode: 'select', label: 'Select and move', key: 'V', Icon: IconSelect },
-  { mode: 'interact', label: 'Interact (use the page normally)', key: 'I', Icon: IconInteract },
-  { mode: 'button', label: 'Add a button', key: 'B', Icon: IconButton },
-  { mode: 'comment', label: 'Comment', key: 'C', Icon: IconComment },
+const TOOLS: { mode: Mode; label: string; shortcut: string; Icon: () => React.JSX.Element }[] = [
+  { mode: 'select', label: 'Select and move', shortcut: 'V', Icon: IconSelect },
+  { mode: 'interact', label: 'Interact (use the page normally)', shortcut: 'I', Icon: IconInteract },
+  { mode: 'comment', label: 'Comment', shortcut: 'C', Icon: IconComment },
 ];
+
+function ToolButton({ mode, label, shortcut, Icon, active }: (typeof TOOLS)[number] & { active: boolean }) {
+  return (
+    <button className="tool" data-active={active || undefined} aria-pressed={active} title={`${label} (${shortcut})`} onClick={() => setMode(mode)}>
+      <Icon />
+    </button>
+  );
+}
+
+function AddTool() {
+  const mode = useStore((s) => s.mode);
+  const open = useStore((s) => s.palette);
+  const addKind = useStore((s) => s.addKind);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setState({ palette: false });
+    };
+    addEventListener('pointerdown', away, true);
+    return () => removeEventListener('pointerdown', away, true);
+  }, [open]);
+
+  const adding = mode === 'add';
+  return (
+    <div className="add-wrap" ref={ref}>
+      <button
+        className="tool"
+        data-active={adding || open || undefined}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Add something to the page (A)"
+        onClick={() => setState({ palette: !open })}
+      >
+        <IconAdd />
+      </button>
+      {adding && !open && <span className="adding">Click the page to place a {componentLabel(addKind)}</span>}
+      {open && (
+        <div className="palette" role="menu" aria-label="Add to page">
+          {COMPONENTS.map((c) => (
+            <button key={c.kind} role="menuitem" className="palette-item" onClick={() => startAdd(c.kind)}>
+              <span className="pi-name">{c.label}</span>
+              <span className="pi-hint">{c.key ?? c.hint}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Topbar() {
   const session = useStore((s) => s.session);
@@ -30,17 +82,12 @@ export function Topbar() {
       </div>
 
       <div className="tools" role="toolbar" aria-label="Tools">
-        {TOOLS.map(({ mode: m, label, key, Icon }) => (
-          <button
-            key={m}
-            className="tool"
-            data-active={mode === m || undefined}
-            aria-pressed={mode === m}
-            title={`${label} (${key})`}
-            onClick={() => setMode(m)}
-          >
-            <Icon />
-          </button>
+        {TOOLS.slice(0, 2).map((t) => (
+          <ToolButton key={t.mode} {...t} active={mode === t.mode} />
+        ))}
+        <AddTool />
+        {TOOLS.slice(2).map((t) => (
+          <ToolButton key={t.mode} {...t} active={mode === t.mode} />
         ))}
         <span className="divider" />
         <button className="tool" title="Undo (Ctrl+Z)" disabled={!canUndo(session)} onClick={undo}>

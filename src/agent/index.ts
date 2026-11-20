@@ -3,7 +3,8 @@
 import { finder } from '@medv/finder';
 import { domToJpeg } from 'modern-screenshot';
 import { PG, type AgentOp, type ElementInfo, type FromAgent, type Mode, type Rect, type ToAgent } from '../shared/protocol.ts';
-import type { Neighbour, Op, Step } from '../shared/types.ts';
+import { componentLabel, type ComponentKind } from '../shared/components.ts';
+import type { CommentType, Neighbour, Op, Step } from '../shared/types.ts';
 import { OVERLAY_CSS } from './overlay-css.ts';
 
 const script = document.currentScript as HTMLScriptElement | null;
@@ -14,6 +15,7 @@ if (EDITOR && window.parent !== window && window.parent === window.top) boot();
 function boot() {
   // ---------- state ----------
   let mode: Mode = 'select';
+  let addKind: ComponentKind = 'button';
   let gridOn = false;
   let gridSize = 8;
   let selected: Element | null = null;
@@ -82,8 +84,10 @@ function boot() {
       (el as HTMLInputElement).value ||
       '';
     const text = String(raw).trim().replace(/\s+/g, ' ').slice(0, 40);
-    const kind =
-      tag === 'a' ? 'link' : tag === 'button' || role === 'button' ? 'button' : tag === 'img' ? 'image' :
+    const pgKind = el.getAttribute('data-pg-kind');
+    const kind = pgKind
+      ? componentLabel(pgKind)
+      : tag === 'a' ? 'link' : tag === 'button' || role === 'button' ? 'button' : tag === 'img' ? 'image' :
       tag === 'input' ? `${(el as HTMLInputElement).type || 'text'} input` : tag;
     if (text) return `${kind} "${text}"`;
     const cls = [...el.classList].find(okClass);
@@ -343,38 +347,109 @@ function boot() {
     });
   }
 
-  function addButton(target: Element) {
-    const container = /^(div|section|form|nav|header|footer|main|aside|li|td|article|fieldset|ul|ol)$/i;
+  // Neutral look that sits fine on light pages; buttons copy the page's own button classes instead.
+  const BORDER = '1px solid rgba(128,128,128,.3)';
+  const BOX = `padding:16px;border:${BORDER};border-radius:12px;background:#fff;color:#1d1d1d;max-width:340px;box-sizing:border-box`;
+  const FIELD = `height:40px;padding:0 12px;border:${BORDER};border-radius:8px;background:#fff;color:#1d1d1d;font:inherit;box-sizing:border-box`;
+  const BTN = `height:36px;padding:0 14px;border:${BORDER};border-radius:8px;background:#fff;color:#1d1d1d;font:inherit;font-weight:600`;
+  const BTN_PRIMARY = BTN.replace('background:#fff;color:#1d1d1d', 'background:#1d1d1d;color:#fff');
+
+  function buildComponent(kind: ComponentKind, id: string, scope: Element): { html: string; editable: boolean } {
+    const k = (inner: string, tag = 'div', style = '') =>
+      `<${tag} data-pg-id="${id}" data-pg-kind="${kind}" style="${style}">${inner}</${tag}>`;
+    switch (kind) {
+      case 'card':
+        return { editable: false, html: k('<h3 style="margin:0 0 4px;font-size:16px">Card title</h3><p style="margin:0;opacity:.7">A short description of what this card is about.</p>', 'div', BOX) };
+      case 'dropdown':
+        return { editable: false, html: k('<option>Option 1</option><option>Option 2</option><option>Option 3</option>', 'select', FIELD) };
+      case 'menu':
+        return {
+          editable: false,
+          html: k(
+            `<summary style="${BTN};display:inline-flex;align-items:center;cursor:pointer;list-style:none">Menu ▾</summary><div style="margin-top:6px;${BOX};padding:6px;max-width:200px"><div style="padding:8px 10px">Item one</div><div style="padding:8px 10px">Item two</div><div style="padding:8px 10px">Item three</div></div>`,
+            'details',
+          ),
+        };
+      case 'popup':
+        return {
+          editable: false,
+          html: k(
+            `<h3 style="margin:0 0 6px;font-size:16px">Popup title</h3><p style="margin:0 0 16px;opacity:.7">What the person sees when this opens.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" style="${BTN}">Cancel</button><button type="button" style="${BTN_PRIMARY}">Confirm</button></div>`,
+            'div',
+            `${BOX};box-shadow:0 12px 40px rgba(0,0,0,.18);max-width:380px`,
+          ),
+        };
+      case 'input':
+        return { editable: false, html: k(`<span style="font-size:13px;opacity:.7">Label</span><input style="${FIELD}" placeholder="Type here" />`, 'label', 'display:grid;gap:6px;max-width:320px') };
+      case 'toggle':
+        return { editable: false, html: k('<input type="checkbox" role="switch" style="width:36px;height:20px" /> Toggle label', 'label', 'display:inline-flex;align-items:center;gap:8px') };
+      case 'tabs':
+        return {
+          editable: false,
+          html: k(
+            ['Overview', 'Details', 'Activity'].map((t, i) => `<button type="button" style="${i === 0 ? BTN_PRIMARY : BTN};border-radius:8px">${t}</button>`).join(''),
+            'div',
+            'display:flex;gap:6px',
+          ),
+        };
+      case 'alert':
+        return { editable: true, html: k('Heads up: something worth noticing.', 'div', `padding:12px 16px;border-left:4px solid #0d99ff;border-radius:6px;background:#eef7ff;color:#12324d`) };
+      case 'badge':
+        return { editable: true, html: k('Badge', 'span', 'display:inline-block;padding:2px 10px;border-radius:999px;background:#e7e7e7;color:#1d1d1d;font-size:12px;font-weight:600') };
+      case 'heading':
+        return { editable: true, html: k('New heading', 'h2', 'margin:0') };
+      case 'text':
+        return { editable: true, html: k('New paragraph. Click and type to change it.', 'p', 'margin:0;max-width:60ch') };
+      case 'list':
+        return { editable: false, html: k('<li>First item</li><li>Second item</li><li>Third item</li>', 'ul', 'margin:0;padding-left:20px') };
+      case 'image':
+        return { editable: false, html: k('', 'div', 'width:240px;height:160px;border-radius:12px;background:linear-gradient(135deg,#d9dde3,#aeb6c2)') };
+      case 'button':
+      default: {
+        const template =
+          scope.querySelector('button, [role=button], a.btn, a.button, .btn') ??
+          scope.closest('section, form, main, body')?.querySelector('button, [role=button], .btn') ??
+          document.querySelector('button');
+        const isLink = template?.tagName === 'A';
+        const el = document.createElement(isLink ? 'a' : 'button');
+        if (template) el.className = template.className;
+        else el.setAttribute('style', BTN);
+        if (isLink) el.setAttribute('href', '#');
+        else el.setAttribute('type', 'button');
+        el.textContent = 'New button';
+        el.setAttribute('data-pg-id', id);
+        el.setAttribute('data-pg-kind', 'button');
+        return { editable: true, html: el.outerHTML };
+      }
+    }
+  }
+
+  function addComponent(target: Element, kind: ComponentKind) {
+    const container = /^(div|section|form|nav|header|footer|main|aside|li|td|article|fieldset|ul|ol|details)$/i;
     const inline = target.matches(INTERACTIVE) || !container.test(target.tagName);
     const ref = target === document.body || target === document.documentElement ? document.body : target;
     const position: 'after' | 'append' = inline && ref !== document.body ? 'after' : 'append';
     const scope = (inline ? target.parentElement : target) ?? document.body;
-    const template =
-      scope.querySelector('button, [role=button], a.btn, a.button, .btn') ??
-      target.closest('section, form, main, body')?.querySelector('button, [role=button], .btn') ??
-      document.querySelector('button');
     const id = newId('o');
-    const isLink = template?.tagName === 'A';
-    const el = document.createElement(isLink ? 'a' : 'button');
-    if (template) el.className = template.className;
-    if (isLink) el.setAttribute('href', '#');
-    else el.setAttribute('type', 'button');
-    el.textContent = 'New button';
-    el.setAttribute('data-pg-id', id);
-    const html = el.outerHTML;
+    const { html, editable } = buildComponent(kind, id, scope);
+    const t = document.createElement('template');
+    t.innerHTML = html;
+    const el = t.content.firstElementChild!;
     if (position === 'append') ref.appendChild(el);
     else ref.after(el);
+    const name = componentLabel(kind);
     emit({
       id,
       kind: 'insert',
       selector: `[data-pg-id="${id}"]`,
-      element: 'button "New button"',
-      label: `Added a button ${position === 'append' ? 'inside' : 'after'} ${describe(ref)}`,
-      insert: { html, ref: selectorOf(ref), position },
+      element: describe(el),
+      label: `Added a ${name} ${position === 'append' ? 'inside' : 'after'} ${describe(ref)}`,
+      insert: { kind: name, html, ref: selectorOf(ref), position },
       neighbours: neighboursOf(el),
     });
     select(el);
-    startTextEdit(el);
+    if (editable) startTextEdit(el);
+    else post({ type: 'added', kind: name });
   }
 
   function duplicate(el: Element) {
@@ -533,7 +608,7 @@ function boot() {
   }
   const menuOpen = () => menuShown;
 
-  function compose(kind: 'comment' | 'change-request', el: Element) {
+  function compose(kind: CommentType, el: Element) {
     select(el);
     post({ type: 'compose', kind, selector: selectorOf(el), element: describe(el), rect: rectOf(el) });
   }
@@ -689,8 +764,8 @@ function boot() {
               ys,
               moved: false,
             };
-          } else if (mode === 'button') {
-            addButton(t);
+          } else if (mode === 'add') {
+            addComponent(t, addKind);
             setMode('select');
           } else if (mode === 'comment') {
             compose('comment', t);
@@ -833,6 +908,7 @@ function boot() {
     switch (m.type) {
       case 'init':
         mode = m.mode;
+        addKind = m.addKind;
         gridOn = m.grid;
         gridSize = m.gridSize;
         pins = m.pins;
@@ -847,6 +923,7 @@ function boot() {
         break;
       case 'mode':
         mode = m.mode;
+        if (m.addKind) addKind = m.addKind;
         hideMenu();
         applyMode();
         break;
@@ -920,6 +997,13 @@ function boot() {
       case 'menuClosed':
         menuShown = false;
         break;
+      case 'place': {
+        // The editor catches placement clicks itself, so a busy page can't mis-order them.
+        const t = pick(document.elementFromPoint(m.x, m.y)) ?? document.body;
+        if (m.what === 'add') addComponent(t, m.kind);
+        else compose('comment', t);
+        break;
+      }
       case 'compose': {
         const el = q(m.selector);
         if (el) compose(m.kind, el);

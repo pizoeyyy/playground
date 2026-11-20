@@ -16,7 +16,7 @@ Do not provide any other information until the user asks a question.
 
 ## What it is
 
-A local review editor around any HTML: a `/prototype` file, a static page, or a live dev server. The user selects elements, recolours them, drags and adds buttons, and right-clicks for **Click this button** (the real click fires and the page behaves normally) or **Request change** (a pinned comment). A click that leads to another page makes that page slide 2, 3, and so on. **Save and send** submits a round to Claude. Claude edits the real source, the editor reloads the revised page, and the user confirms or reopens each item.
+A local review editor around any HTML: a `/prototype` file, a static page, or a live dev server. The user selects elements, recolours them, drags them, adds things from a palette (buttons, cards, dropdowns, menus, popups, inputs, toggles, tabs, banners, badges, headings, text, lists, images), and right-clicks for **Click this button** (the real click fires and the page behaves normally), **Describe behavior** (what it should do when used), or **Request change** (a pinned comment). A click that leads to another page makes that page slide 2, 3, and so on. **Save and send** submits a round to Claude. Claude edits the real source, the editor reloads the revised page, and the user confirms or reopens each item.
 
 The tool lives in `~/dev/playground` inside WSL Ubuntu (Node and `gh` exist only there). This skill drives it; never reimplement it.
 
@@ -74,7 +74,7 @@ Below, `pg <command>` is short for that. Every command after `serve` takes `--se
 1. `pg serve <wsl-path-or-url> [--session DIR]` in the background. Read its output file for the `PLAYGROUND editor=…` line; the port may not be 4800 if that was busy.
 2. `pg wait --session DIR` in the background. Its exit is what wakes you when the user presses Save and send. Don't poll.
 
-Open the editor URL in the built-in browser pane (`preview_start` with `url`). Tell the user in one line where it is and the keys: `V` select, `I` interact, `B` add button, `C` comment, `'` grid, `Ctrl+Z` undo, `Ctrl+Enter` send.
+Open the editor URL in the built-in browser pane (`preview_start` with `url`). Tell the user in one line where it is and the keys: `V` select, `I` interact, `A` add menu (`B` for a button), `C` comment, `'` grid, `Ctrl+Z` undo, `Ctrl+Enter` send.
 
 ### 3. A round arrives
 
@@ -83,10 +83,17 @@ The `wait` task's output is the round: slides, how each slide was reached, and e
 - **CHANGE REQUEST**: implement what it asks, following the project's conventions (file layout, naming, tokens).
 - **STYLE**: change the style where it is defined (class, token, CSS variable; inline only if the file already works that way). If the new colour is close to an existing token, use the token and say so in the note.
 - **TEXT**: change the copy in the source.
-- **INSERT / DUPLICATE**: add a real element in that position, matching its nearest sibling's markup and classes. Drop `data-pg-id`.
+- **BEHAVIOR**: the user describes what an element should *do* ("on click, open the confirm popup; Cancel closes it"). It can sit on an existing element or on one they just added. Build the real interaction: state, handlers, navigation, show/hide, validation, whatever the description needs, in the project's stack and conventions. The inserted element is only a placeholder look; the behavior comment is the spec. If the description leaves something open (what the dropdown options are, where Confirm goes), use a sensible default and say which in the note, or ask with `--state question` if it changes the design.
+- **INSERT / DUPLICATE**: add the real thing in that position. The line after INSERT names the kind: button, card, dropdown, menu, popup, input, toggle, tabs, banner, badge, heading, text, list or image. The markup shown is a neutral placeholder (inline styles, `data-pg-kind`). Rebuild it with the project's own components, classes and tokens, matching its nearest sibling, and drop `data-pg-id`, `data-pg-kind` and the placeholder inline styles. Kind hints:
+  - **popup**: a real modal/dialog (not inline). Hidden until something opens it, unless a BEHAVIOR says otherwise; wire its Cancel and Confirm.
+  - **menu**: a trigger that opens a list; **dropdown**: a select with the project's field style. Options are placeholders unless a BEHAVIOR names them.
+  - **tabs**: working tabs that switch real panels, or ask what each tab shows.
+  - **card**, **banner**, **badge**: use the project's existing card, alert and badge components if there are any.
 - **DELETE**: remove the element (or the condition that renders it).
 - **MOVE**: see Auto-align.
 - **COMMENT**: no code change. Answer it in the note if it asks something, otherwise acknowledge it.
+
+An inserted element and a BEHAVIOR on it are one piece of work: build the element and its interaction together, then write a `pg result` for **each** of the two item ids.
 
 Order: `pg snapshot` the files you'll touch, edit them, then one `pg result` per item, then `pg finish`. Notes are one plain sentence naming the file and what changed. Use `--state question` with the question as the note when you can't proceed. Questions come back to the user as open change requests.
 

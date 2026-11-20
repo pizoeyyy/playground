@@ -1,7 +1,8 @@
 // postMessage protocol between the editor (parent) and the agent (inside the page iframe).
+import type { ComponentKind } from './components.ts';
 import type { CommentType, Op, Step } from './types.ts';
 
-export type Mode = 'select' | 'interact' | 'button' | 'comment';
+export type Mode = 'select' | 'interact' | 'add' | 'comment';
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -30,11 +31,12 @@ export type FromAgent =
   | { type: 'thumb'; dataUrl: string }
   | { type: 'mode'; mode: Mode }
   | { type: 'menu'; x: number; y: number; selector: string; element: string; rect: Rect; clickable: boolean; hasText: boolean; hasParent: boolean }
-  | { type: 'dismiss' };
+  | { type: 'dismiss' }
+  | { type: 'added'; kind: string };
 
 export type ToAgent =
-  | { type: 'init'; ops: Op[]; mode: Mode; grid: boolean; gridSize: number; pins: string[] }
-  | { type: 'mode'; mode: Mode }
+  | { type: 'init'; ops: Op[]; mode: Mode; grid: boolean; gridSize: number; pins: string[]; addKind: ComponentKind }
+  | { type: 'mode'; mode: Mode; addKind?: ComponentKind }
   | { type: 'grid'; show: boolean; size: number }
   | { type: 'apply'; op: Op }
   | { type: 'revert'; op: Op }
@@ -47,6 +49,7 @@ export type ToAgent =
   | { type: 'replay'; path: Step[] }
   | { type: 'capture' }
   | { type: 'menuClosed' }
+  | { type: 'place'; x: number; y: number; what: 'add' | 'comment'; kind: ComponentKind }
   | { type: 'compose'; selector: string; kind: CommentType };
 
 export const PG = '__pg';

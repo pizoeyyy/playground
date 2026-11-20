@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { activeOps, canUndo, newId, reduce } from '../shared/session.ts';
 import { PG, type ElementInfo, type FromAgent, type Mode, type Rect, type ToAgent } from '../shared/protocol.ts';
+import type { ComponentKind } from '../shared/components.ts';
 import type { Action, CommentType, Op, Session, Slide, Step } from '../shared/types.ts';
 
 export type Device = 'desktop' | 'tablet' | 'mobile';
@@ -16,6 +17,8 @@ export type State = {
   frameKey: number; // bump to reload the iframe
   frameUrl: string; // path loaded into the iframe
   mode: Mode;
+  addKind: ComponentKind;
+  palette: boolean;
   grid: boolean;
   gridSize: number;
   device: Device;
@@ -37,6 +40,8 @@ let state: State = {
   frameKey: 0,
   frameUrl: '/',
   mode: 'select',
+  addKind: 'button',
+  palette: false,
   grid: false,
   gridSize: 8,
   device: 'desktop',
@@ -133,6 +138,7 @@ export function initAgent() {
     type: 'init',
     ops: slideOps(state.current),
     mode: state.mode,
+    addKind: state.addKind,
     grid: state.grid,
     gridSize: state.gridSize,
     pins: slidePins(state.current),
@@ -276,6 +282,9 @@ export function onAgentMessage(e: MessageEvent) {
     case 'menu':
       setState({ menu: m, composer: null, openThread: null });
       break;
+    case 'added':
+      toast(`Added a ${m.kind}. Right-click it → Describe behavior to say what it does.`);
+      break;
     case 'dismiss':
       setState({ menu: null });
       break;
@@ -291,8 +300,14 @@ export function closeMenu() {
 // ---------- commands ----------
 
 export function setMode(mode: Mode) {
-  setState({ mode });
+  setState({ mode, palette: false });
   toAgent({ type: 'mode', mode });
+}
+
+/** Pick a component from the palette; the next click on the page drops it there. */
+export function startAdd(kind: ComponentKind) {
+  setState({ mode: 'add', addKind: kind, palette: false });
+  toAgent({ type: 'mode', mode: 'add', addKind: kind });
 }
 
 export function toggleGrid() {
@@ -395,13 +410,15 @@ export function handleKey(key: string, ctrl: boolean, shift: boolean) {
   if (ctrl) return;
   if (key === 'Escape') {
     if (state.menu) return closeMenu();
+    if (state.palette) return setState({ palette: false });
     if (state.composer || state.openThread) return setState({ composer: null, openThread: null });
     if (state.mode !== 'select') return setMode('select');
     return toAgent({ type: 'select', selector: null });
   }
   if (k === 'v') setMode('select');
   else if (k === 'i') setMode('interact');
-  else if (k === 'b') setMode('button');
+  else if (k === 'b') startAdd('button');
+  else if (k === 'a') setState({ palette: !state.palette });
   else if (k === 'c') setMode('comment');
   else if (key === "'") toggleGrid();
 }

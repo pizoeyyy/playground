@@ -2,7 +2,9 @@
 
 A Figma-like review editor for HTML, built for Claude Code. Open a `/prototype` file or your running app, click around it, mark it up, and hand the changes to Claude in one batch.
 
-- **Select, recolour, edit text, drag, add buttons.** Moves snap to an 8px grid and to neighbouring edges, with guides. Hold Alt to place freely.
+- **Select, recolour, edit text, drag.** Moves snap to an 8px grid and to neighbouring edges, with guides. Hold Alt to place freely.
+- **Add things from a palette** (`A`): button, card, dropdown, menu, popup, input, toggle, tabs, banner, badge, heading, text, list, image. Pick one, then click the page to drop it.
+- **Say what it should do.** Right-click any new or existing element → **Describe behavior…** ("on click, open the confirm popup; Cancel closes it"). Claude builds the real interaction from that note.
 - **Undo everything** with `Ctrl+Z` / `Ctrl+Shift+Z`, or the toolbar buttons.
 - **Right-click any element:**
   - **Click this button** fires the real click, so the page behaves normally.
@@ -46,7 +48,8 @@ node dist/cli.js finish --session examples/two-page --round 1
 
 | Key | |
 | --- | --- |
-| `V` / `I` / `B` / `C` | Select · Interact · Add button · Comment |
+| `V` / `I` / `C` | Select · Interact · Comment |
+| `A` / `B` | Add menu · Add a button |
 | `'` | Grid |
 | `Ctrl Z` / `Ctrl Shift Z` | Undo / redo |
 | Arrows | Nudge 8px (Shift: 1px) |

@@ -12,13 +12,16 @@ export function describeOp(op: Op): string {
   if (op.kind === 'style' && op.prop) lines.push(`    ${op.prop}: ${op.before ?? '?'} -> ${op.after}`);
   if (op.kind === 'text') lines.push(`    text: ${JSON.stringify(op.before)} -> ${JSON.stringify(op.after)}`);
   if (op.kind === 'move') lines.push(`    dragged offset (a rough hint, not pixels to copy): ${op.after}`);
-  if (op.insert) lines.push(`    new element ${op.insert.position} ${op.insert.ref}:`, `    ${op.insert.html}`);
+  if (op.insert) {
+    lines.push(`    new ${op.insert.kind ?? 'element'} ${op.insert.position === 'append' ? 'inside' : 'after'} ${op.insert.ref}:`);
+    lines.push(`    ${op.insert.html}`);
+  }
   for (const n of op.neighbours ?? []) lines.push(`    now ${n.relation} ${n.text}  (${n.selector})`);
   return lines.join('\n');
 }
 
 export function describeComment(c: Comment): string {
-  const kind = c.type === 'change-request' ? 'CHANGE REQUEST' : 'COMMENT';
+  const kind = c.type === 'change-request' ? 'CHANGE REQUEST' : c.type === 'behavior' ? 'BEHAVIOR' : 'COMMENT';
   const lines = [`[${c.id}] ${kind} on ${c.element}  selector: ${c.selector}`, `    "${c.body}"`];
   for (const r of c.replies) lines.push(`    ${r.author}: "${r.body}"`);
   return lines.join('\n');

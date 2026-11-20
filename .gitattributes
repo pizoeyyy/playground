@@ -1,0 +1,5 @@
+# Keep shell scripts LF even when cloned on Windows (a CRLF install.sh fails in bash).
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary

@@ -1,14 +1,15 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { folderSignature, proxyFrame, staticFrame } from './frame.ts';
-import { pgDir, serverFile, Store } from './store.ts';
+import { filesSignature, proxyFrame, staticFrame } from './frame.ts';
+import { LAST_FILE, serverFile, Store, writeFileAtomic } from './store.ts';
 import { openRound } from '../shared/session.ts';
 import type { Action } from '../shared/types.ts';
 
 export type ServeOptions = {
   target: string; // absolute file path or http URL
-  sessionDir: string;
+  dataDir: string; // where session.json, thumbnails and snapshots live
+  root: string; // project folder (file target: its folder)
   port: number;
   host: string;
   distDir: string;
@@ -50,8 +51,9 @@ function listen(server: http.Server, port: number, host: string): Promise<void> 
 
 export async function serve(o: ServeOptions) {
   const isUrl = /^https?:\/\//i.test(o.target);
-  const store = new Store(o.sessionDir, o.target, isUrl ? 'url' : 'file');
-  const dir = pgDir(o.sessionDir);
+  const dir = o.dataDir;
+  fs.mkdirSync(dir, { recursive: true });
+  const store = new Store(dir, o.target, isUrl ? 'url' : 'file', o.root);
   fs.mkdirSync(path.join(dir, 'thumbs'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
 
@@ -146,10 +148,11 @@ export async function serve(o: ServeOptions) {
   });
 
   const agentFile = path.join(o.distDir, 'agent.js');
+  const served = new Set<string>([o.target]);
   const makeFrame = () =>
     isUrl
       ? proxyFrame(o.target, { agentFile, editorOrigin: ports().editor, frameOrigin: () => ports().frame })
-      : staticFrame(o.target, { agentFile, editorOrigin: ports().editor });
+      : staticFrame(o.target, { agentFile, editorOrigin: ports().editor, served });
   let frame = makeFrame();
 
   // Find a free pair of ports: editor on N, page on N+1.
@@ -171,26 +174,25 @@ export async function serve(o: ServeOptions) {
   }
 
   // Live reload for file targets (dev servers have their own HMR).
-  let sig = isUrl ? '' : folderSignature(path.dirname(o.target));
+  let sig = isUrl ? '' : filesSignature(served);
   const watch = isUrl
     ? undefined
     : setInterval(() => {
-        const next = folderSignature(path.dirname(o.target));
+        const next = filesSignature(served);
         if (next !== sig) {
           sig = next;
           broadcast('reload', { at: Date.now() });
         }
       }, 800);
 
-  fs.writeFileSync(
-    serverFile(o.sessionDir),
-    JSON.stringify({ pid: process.pid, port, framePort: port + 1, target: o.target, startedAt: Date.now() }, null, 2),
-  );
+  const info = { pid: process.pid, port, framePort: port + 1, target: o.target, dataDir: dir, startedAt: Date.now() };
+  writeFileAtomic(serverFile(dir), JSON.stringify(info, null, 2));
+  writeFileAtomic(LAST_FILE, JSON.stringify(info, null, 2));
 
   const shutdown = () => {
     try {
-      const info = JSON.parse(fs.readFileSync(serverFile(o.sessionDir), 'utf8'));
-      if (info.pid === process.pid) fs.rmSync(serverFile(o.sessionDir));
+      const info = JSON.parse(fs.readFileSync(serverFile(dir), 'utf8'));
+      if (info.pid === process.pid) fs.rmSync(serverFile(dir));
     } catch {
       /* already gone */
     }
@@ -203,5 +205,5 @@ export async function serve(o: ServeOptions) {
   process.on('SIGHUP', shutdown);
 
   const { editor: e, frame: f } = ports();
-  console.log(`PLAYGROUND editor=${e} frame=${f} session=${path.join(dir, 'session.json')}`);
+  console.log(`PLAYGROUND editor=${e} frame=${f} session=${dir}`);
 }

@@ -35,7 +35,10 @@ export type FromAgent =
   | { type: 'added'; kind: string };
 
 export type ToAgent =
-  | { type: 'init'; ops: Op[]; mode: Mode; grid: boolean; gridSize: number; pins: string[]; addKind: ComponentKind }
+  | { type: 'init'; ops: Op[]; mode: Mode; grid: boolean; gridSize: number; pins: string[]; addKind: ComponentKind; thumbs: boolean; zoom: number }
+  | { type: 'thumbs'; on: boolean }
+  | { type: 'zoom'; scale: number }
+  | { type: 'resize'; selector: string; w: number | null; h: number | null }
   | { type: 'mode'; mode: Mode; addKind?: ComponentKind }
   | { type: 'grid'; show: boolean; size: number }
   | { type: 'apply'; op: Op }

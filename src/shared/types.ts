@@ -21,7 +21,7 @@ export type InsertSpec = {
   position: 'after' | 'append';
 };
 
-export type OpKind = 'style' | 'text' | 'move' | 'insert' | 'delete' | 'duplicate';
+export type OpKind = 'style' | 'text' | 'move' | 'resize' | 'insert' | 'delete' | 'duplicate';
 
 export type Op = {
   id: string;
@@ -33,7 +33,8 @@ export type Op = {
   prop?: string; // style: CSS property; move: "translate"; delete: "display"
   before?: string; // computed/visible value before (for people and Claude)
   after?: string;
-  beforeInline?: string; // exact inline value to restore on undo
+  beforeInline?: string; // exact inline value to restore on undo (resize: JSON of width/height/translate)
+  afterTranslate?: string; // resize: keeps the anchored edge still
   insert?: InsertSpec;
   neighbours?: Neighbour[];
   coalesce?: boolean; // may merge with an immediately preceding op on the same target
@@ -83,6 +84,7 @@ export type Session = {
   version: 1;
   target: string;
   targetKind: 'file' | 'url';
+  root?: string; // project folder the source lives in (file target: its folder)
   slides: Slide[];
   ops: Op[];
   undoPointer: number; // ops[0..undoPointer) are active, the rest are redo-able

@@ -1,26 +1,36 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from './serve.ts';
-import { readSession, serverFile, sessionFile, writeSession } from './store.ts';
-import { pgDir } from './store.ts';
+import {
+  defaultDataDir,
+  LAST_FILE,
+  readSession,
+  resolveDataDir,
+  serverFile,
+  sessionFile,
+  writeSession,
+} from './store.ts';
 import { describeRound, describeStatus } from '../shared/describe.ts';
 import { latestRound, openRound, reduce } from '../shared/session.ts';
 import type { Action, ResultState, Session } from '../shared/types.ts';
 
 const HELP = `playground — review editor for HTML prototypes and live apps
 
-  playground serve <file.html | http://localhost:PORT> [--port 4800] [--session DIR] [--host 127.0.0.1]
-  playground wait     --session DIR         block until a round is sent, then print it
-  playground show     --session DIR [--round N] [--json]
-  playground status   --session DIR
-  playground snapshot --session DIR --round N <files...>
-  playground result   --session DIR --round N --item ID --state applied|question --note "..."
-  playground finish   --session DIR --round N
-  playground stop     --session DIR
+  playground serve <file.html | http://localhost:PORT> [--port 4800] [--root DIR] [--session DIR]
+  playground wait     [--session DIR]        block until a round is sent, then print it
+  playground show     [--session DIR] [--round N] [--json]
+  playground status   [--session DIR]
+  playground snapshot [--session DIR] --round N <files...>
+  playground result   [--session DIR] --round N --item ID --state applied|question --note "..."
+  playground finish   [--session DIR] --round N
+  playground stop     [--session DIR]
 
-DIR is the folder that holds .playground/ (default: the target file's folder, or the current folder).`;
+serve prints "PLAYGROUND editor=URL frame=URL session=DIR". Pass that DIR as --session to the
+other commands; without it they use the most recently started session.
+--root is the project folder for URL targets (default: the current folder).`;
 
 function parse(argv: string[]) {
   const pos: string[] = [];
@@ -40,18 +50,41 @@ function parse(argv: string[]) {
   return { pos, flags };
 }
 
+/**
+ * Accept Windows paths (C:\x or C:/x) when running inside WSL, so Claude Code on Windows can pass
+ * paths as it sees them. Elsewhere this is plain path.resolve.
+ */
+function localPath(p: string): string {
+  if (process.platform === 'linux' && /^[A-Za-z]:[\\/]/.test(p)) {
+    try {
+      return execFileSync('wslpath', ['-u', p.replace(/\//g, '\\')], { encoding: 'utf8' }).trim();
+    } catch {
+      return `/mnt/${p[0].toLowerCase()}/${p.slice(3).replace(/\\/g, '/')}`;
+    }
+  }
+  return path.resolve(p);
+}
+
 const die = (msg: string, code = 1): never => {
   console.error(msg);
   process.exit(code);
 };
 
-type ServerInfo = { pid: number; port: number; framePort: number };
+type ServerInfo = { pid: number; port: number; framePort: number; dataDir?: string };
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 function serverInfo(dir: string): ServerInfo | null {
   try {
     const info = JSON.parse(fs.readFileSync(serverFile(dir), 'utf8')) as ServerInfo;
-    process.kill(info.pid, 0);
-    return info;
+    return alive(info.pid) ? info : null;
   } catch {
     return null;
   }
@@ -84,10 +117,21 @@ function roundArg(s: Session, flags: Record<string, string | true>) {
   return r ?? die(n ? `No round ${n}.` : 'No rounds yet.');
 }
 
+/** --session, else the last session started on this machine. */
+function dataDirArg(flags: Record<string, string | true>): string {
+  if (typeof flags.session === 'string') return resolveDataDir(localPath(flags.session));
+  try {
+    const last = JSON.parse(fs.readFileSync(LAST_FILE, 'utf8')) as ServerInfo;
+    if (last.dataDir) return last.dataDir;
+  } catch {
+    /* none yet */
+  }
+  return die('No session. Start one with "playground serve <file|url>", or pass --session DIR.');
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { pos, flags } = parse(rest);
-  const sessionDir = (fallback: string) => path.resolve(typeof flags.session === 'string' ? flags.session : fallback);
 
   switch (cmd) {
     case 'serve': {
@@ -98,15 +142,19 @@ async function main() {
         const host = new URL(raw).hostname;
         if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(host)) die('Only localhost URLs can be proxied.');
       } else {
-        target = path.resolve(raw);
+        target = localPath(raw);
         if (!fs.existsSync(target) || !fs.statSync(target).isFile()) die(`No such file: ${target}`);
       }
-      const dir = sessionDir(isUrl ? process.cwd() : path.dirname(target));
+      const root = isUrl ? (typeof flags.root === 'string' ? localPath(flags.root) : process.cwd()) : path.dirname(target);
+      const dir = typeof flags.session === 'string' ? resolveDataDir(localPath(flags.session)) : defaultDataDir(target);
       const running = serverInfo(dir);
-      if (running) die(`Already running for this folder: editor http://localhost:${running.port} (pid ${running.pid}). Run "playground stop" first.`);
+      if (running) {
+        die(`Already running for this target: editor http://localhost:${running.port} (pid ${running.pid}). Run "playground stop --session ${dir}" first.`);
+      }
       await serve({
         target,
-        sessionDir: dir,
+        dataDir: dir,
+        root,
         port: Number(flags.port ?? 4800),
         host: typeof flags.host === 'string' ? flags.host : '127.0.0.1',
         distDir: path.dirname(fileURLToPath(import.meta.url)),
@@ -114,12 +162,13 @@ async function main() {
       return;
     }
     case 'wait': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       let missing = 0;
       for (;;) {
         const s = readSession(dir);
         const r = s && openRound(s);
         if (s && r) {
+          console.log(`session: ${dir}`);
           console.log(describeRound(s, r));
           return;
         }
@@ -129,29 +178,32 @@ async function main() {
       }
     }
     case 'show': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       const s = readSession(dir) ?? die(`No session at ${sessionFile(dir)}`);
       const r = roundArg(s, flags);
       console.log(flags.json ? JSON.stringify(r, null, 2) : describeRound(s, r));
       return;
     }
     case 'status': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       const s = readSession(dir) ?? die(`No session at ${sessionFile(dir)}`);
       const info = serverInfo(dir);
+      console.log(`session: ${dir}`);
       console.log(info ? `server: running, editor http://localhost:${info.port}` : 'server: not running');
       console.log(describeStatus(s));
       return;
     }
     case 'snapshot': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
+      const s = readSession(dir);
+      const root = s?.root ?? process.cwd();
       const n = Number(flags.round ?? die('--round is required'));
-      const dest = path.join(pgDir(dir), 'revisions', `r${n}`);
+      const dest = path.join(dir, 'revisions', `r${n}`);
       for (const f of pos) {
-        const src = path.resolve(f);
+        const src = localPath(f);
         if (!fs.existsSync(src)) die(`No such file: ${src}`);
-        const rel = path.relative(dir, src);
-        const to = path.join(dest, rel.startsWith('..') ? path.basename(src) : rel);
+        const rel = path.relative(root, src);
+        const to = path.join(dest, rel.startsWith('..') || path.isAbsolute(rel) ? path.basename(src) : rel);
         fs.mkdirSync(path.dirname(to), { recursive: true });
         fs.copyFileSync(src, to);
         console.log(`saved ${to}`);
@@ -159,7 +211,7 @@ async function main() {
       return;
     }
     case 'result': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       const state = flags.state as ResultState;
       if (state !== 'applied' && state !== 'question') die('--state must be applied or question');
       const item = typeof flags.item === 'string' ? flags.item : die('--item is required');
@@ -170,7 +222,7 @@ async function main() {
       return;
     }
     case 'finish': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       const n = Number(flags.round ?? die('--round is required'));
       const s = await dispatch(dir, { type: 'finish', round: n });
       const r = s.rounds.find((x) => x.n === n);
@@ -178,13 +230,19 @@ async function main() {
       return;
     }
     case 'stop': {
-      const dir = sessionDir(process.cwd());
+      const dir = dataDirArg(flags);
       const info = serverInfo(dir);
       if (!info) {
         console.log('not running');
         return;
       }
       process.kill(info.pid, 'SIGTERM');
+      // Windows ends the process without running its exit handler, so tidy up here too.
+      try {
+        fs.rmSync(serverFile(dir));
+      } catch {
+        /* already gone */
+      }
       console.log(`stopped pid ${info.pid}`);
       return;
     }

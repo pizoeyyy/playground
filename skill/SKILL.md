@@ -1,6 +1,6 @@
 ---
 name: playground
-description: Open an HTML prototype or a running app in a Figma-like review editor where you can recolour, move and add buttons, pin comments and change requests, and click through pages as slides. "Save and send" hands the round to Claude, which applies it and redeploys the revision for you to confirm.
+description: Open an HTML prototype or a running app in a Figma-like review editor where you can recolour, move, resize and add elements, pin comments and change requests, and click through pages as slides. "Save and send" hands the round to Claude, which applies it and redeploys the revision for you to confirm.
 disable-model-invocation: true
 ---
 
@@ -16,14 +16,14 @@ Do not provide any other information until the user asks a question.
 
 ## What it is
 
-A local review editor around any HTML: a `/prototype` file, a static page, or a live dev server. The user selects elements, recolours them, drags them, adds things from a palette (buttons, cards, dropdowns, menus, popups, inputs, toggles, tabs, banners, badges, headings, text, lists, images), and right-clicks for **Click this button** (the real click fires and the page behaves normally), **Describe behavior** (what it should do when used), or **Request change** (a pinned comment). A click that leads to another page makes that page slide 2, 3, and so on. **Save and send** submits a round to Claude. Claude edits the real source, the editor reloads the revised page, and the user confirms or reopens each item.
+A local review editor around any HTML: a `/prototype` file, a static page, or a live dev server. The user selects elements, recolours them, drags and resizes them, adds things from a palette (buttons, cards, dropdowns, menus, popups, inputs, toggles, tabs, banners, badges, headings, text, lists, images), and right-clicks for **Click this button** (the real click fires and the page behaves normally), **Describe behavior** (what it should do when used), or **Request change** (a pinned comment). A click that leads to another page makes that page slide 2, 3, and so on. **Save and send** submits a round to Claude. Claude edits the real source, the editor reloads the revised page, and the user confirms or reopens each item.
 
-The tool lives in `~/dev/playground` inside WSL Ubuntu (Node and `gh` exist only there). This skill drives it; never reimplement it.
+The tool ships inside this skill folder as `dist/cli.js` (a Node script, no dependencies). This skill drives it; never reimplement it. It works on Windows, macOS and Linux.
 
 ## Hard Rules
 
-1. **Never edit source until a round is submitted** (Save and send, or `apply`). Exploring, commenting and dragging only touch `.playground/session.json`.
-2. **Interpret intent, not pixels.** Recorded moves are rough hints. Never write `position: absolute`, `translate`, or magic margins to reproduce a drag (see Auto-align).
+1. **Never edit source until a round is submitted** (Save and send, or `apply`). Exploring, commenting and dragging only touch the session data (kept in `~/.playground/sessions/`, outside the project).
+2. **Interpret intent, not pixels.** Recorded moves and resizes are rough hints. Never write `position: absolute`, `translate`, magic margins or one-off pixel widths to reproduce a drag (see Auto-align).
 3. **Never guess.** If an item is ambiguous or can't be mapped to the source, record it as a `question`.
 4. **Snapshot before editing** with `playground snapshot`, so the round can be rolled back.
 5. **Write results through the CLI**, never by editing `session.json` by hand: the CLI goes through the running server so the editor updates live.
@@ -31,20 +31,28 @@ The tool lives in `~/dev/playground` inside WSL Ubuntu (Node and `gh` exist only
 
 ## Running commands
 
-All commands run in WSL. From the Bash tool on Windows, prefix `MSYS_NO_PATHCONV=1` so Git Bash doesn't rewrite `/tmp` or `/mnt` paths, and use a login shell so Node is on the PATH:
+`SKILL_DIR` below is this skill's folder: the base directory shown when the skill loads (normally `~/.claude/skills/playground`). Pick a runner once per session, in this order:
 
-```bash
-MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- bash -lc "cd ~/dev/playground && node dist/cli.js <command> ..."
-```
+1. **Node on this machine** (Windows, macOS, Linux): `node --version` prints v18 or later.
+   `pg <command>` means `node "SKILL_DIR/dist/cli.js" <command>`. On Windows, forward slashes in the path are fine.
+2. **Windows without Node, but with Node inside WSL**: `MSYS_NO_PATHCONV=1 wsl.exe -- bash -lc 'node --version'` prints v18 or later.
+   Write SKILL_DIR as a WSL path: drive letter to `/mnt/<lowercase drive>`, forward slashes (`C:\Users\ana\.claude\skills\playground` becomes `/mnt/c/Users/ana/.claude/skills/playground`). `pg <command>` means:
+   ```bash
+   MSYS_NO_PATHCONV=1 wsl.exe -- bash -lc 'node /mnt/c/Users/ana/.claude/skills/playground/dist/cli.js <command>'
+   ```
+   File paths you pass to the CLI can stay Windows-style with forward slashes (`C:/Users/ana/site/index.html`); the CLI converts them. Don't put backslashes inside the `bash -lc` string: they get mangled on the way into WSL. A dev server must run inside WSL to be reachable.
+3. **Neither**: tell the user Node.js 20+ is needed (https://nodejs.org) and stop.
 
-Below, `pg <command>` is short for that. Every command after `serve` takes `--session DIR`: the folder holding `.playground/`. For a file target it is the file's folder; for a URL target it is the project folder you pass to `serve`.
+If `SKILL_DIR/dist/cli.js` is missing, the skill was copied without its tool: tell the user to run the install script from the playground repo (`scripts/install.sh` on macOS/Linux/WSL/Git Bash, `scripts\install.ps1` in Windows PowerShell), and stop.
+
+`serve` prints `PLAYGROUND editor=URL frame=URL session=DIR`. Pass that `DIR` as `--session DIR` to every later command, so two sessions on one machine never mix. Without it, commands use the most recently started session.
 
 | Command | Use |
 | --- | --- |
-| `pg serve <file \| http://localhost:N> [--session DIR]` | Start the editor. Prints `PLAYGROUND editor=URL frame=URL session=PATH` |
+| `pg serve <file \| http://localhost:N> [--root PROJECT]` | Start the editor. `--root` is the project folder for URL targets (default: current folder) |
 | `pg wait --session DIR` | Blocks until a round is sent, prints it, exits 0. Exits 3 with `STOPPED` if the server is gone |
 | `pg show --session DIR [--round N] [--json]` | Print a round |
-| `pg snapshot --session DIR --round N <files...>` | Copy files to `.playground/revisions/rN/` before editing |
+| `pg snapshot --session DIR --round N <files...>` | Copy files into the session's `revisions/rN/` before editing |
 | `pg result --session DIR --round N --item ID --state applied\|question --note "..."` | Record one item's outcome |
 | `pg finish --session DIR --round N` | Mark the round applied; the editor reloads and shows the review |
 | `pg status --session DIR` | Per-slide summary |
@@ -65,16 +73,18 @@ Below, `pg <command>` is short for that. Every command after `serve` takes `--se
 
 ### 1. Preflight
 
-- `pg` must exist: `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- bash -lc "test -f ~/dev/playground/dist/cli.js && echo ok"`. If not, tell the user to run `~/dev/playground/scripts/install.sh` in WSL, and stop.
-- File target: convert the Windows path with `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- wslpath -u 'C:\path\to\file.html'`.
-- URL target: only `localhost` / `127.0.0.1` / `[::1]`. The dev server must run **inside WSL**; a server on Windows isn't reachable from there. Pass `--session` with the project's WSL path.
+- Pick the runner (see Running commands) and check `SKILL_DIR/dist/cli.js` exists.
+- File target: an absolute path (on Windows, use forward slashes: `C:/Users/ana/site/index.html`).
+- URL target: only `localhost` / `127.0.0.1` / `[::1]`, and the dev server must already be running. Pass `--root` with the project folder.
 
 ### 2. Start (two background Bash tasks)
 
-1. `pg serve <wsl-path-or-url> [--session DIR]` in the background. Read its output file for the `PLAYGROUND editor=…` line; the port may not be 4800 if that was busy.
+1. `pg serve <path-or-url> [--root PROJECT]` in the background. Read its output file for the `PLAYGROUND editor=… session=…` line; the port may not be 4800 if that was busy.
 2. `pg wait --session DIR` in the background. Its exit is what wakes you when the user presses Save and send. Don't poll.
 
 Open the editor URL in the built-in browser pane (`preview_start` with `url`). Tell the user in one line where it is and the keys: `V` select, `I` interact, `A` add menu (`B` for a button), `C` comment, `'` grid, `Ctrl+Z` undo, `Ctrl+Enter` send.
+
+If the editor shows **"This page keeps reloading itself"**, something outside the playground is reloading the page in a loop: usually a dev tool that reloads on any file change (VS Code Live Server, browser-sync), or a redirect loop in the app. Tell the user which, if you can see it from the project; the playground has already paused live reload and thumbnails.
 
 ### 3. A round arrives
 
@@ -90,7 +100,7 @@ The `wait` task's output is the round: slides, how each slide was reached, and e
   - **tabs**: working tabs that switch real panels, or ask what each tab shows.
   - **card**, **banner**, **badge**: use the project's existing card, alert and badge components if there are any.
 - **DELETE**: remove the element (or the condition that renders it).
-- **MOVE**: see Auto-align.
+- **MOVE** and **RESIZE**: see Auto-align.
 - **COMMENT**: no code change. Answer it in the note if it asks something, otherwise acknowledge it.
 
 An inserted element and a BEHAVIOR on it are one piece of work: build the element and its interaction together, then write a `pg result` for **each** of the two item ids.
@@ -104,6 +114,7 @@ The user drops things roughly and the editor snaps to a grid, but the code must 
 - Read a move's **intent** from its neighbours ("now below Pay", "now right of Back") and its direction. It may be a reorder within a row or column, a spacing change, or a move into another container.
 - Use the existing layout system: flex/grid order and gap, the project's spacing tokens, existing alignment utilities.
 - An element dropped "roughly right of Pay" becomes a sibling in Pay's row with the same height, radius and gap, aligned to its neighbours' edges and baselines. Equalise gaps within a group.
+- A **resize** says how big the user wants it, roughly. Read the label first: "now fills its container width" means full width (`width: 100%`, `align-self: stretch`, `w-full`, `flex: 1` in a row); "same width as card X" means match X (shared class, equal grid columns, `flex: 1` on both). Otherwise round to the project's size scale or tokens and prefer `min-width`/`max-width`, padding or grid tracks over a fixed width, so it still works at other screen sizes. Fixed heights are rarely right for text content; prefer padding or `min-height`.
 - If the container has no layout system (absolutely positioned canvas, image map), ask with `--state question` rather than inventing one.
 - If two layouts fit the drag, pick the one that touches less code and mention the other in the note.
 

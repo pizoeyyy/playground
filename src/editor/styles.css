@@ -22,8 +22,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.app { display: grid; grid-template-rows: 48px 1fr; height: 100%; background: var(--bg); }
-.body { display: grid; grid-template-columns: 216px 1fr 272px; min-height: 0; }
+.app { display: grid; grid-template-rows: 48px auto 1fr; height: 100%; background: var(--bg); }
+.loop-banner { grid-row: 2;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px;
+  background: #fff4e0; color: #5c3b00; border-bottom: 1px solid #f5deb0;
+}
+.loop-banner b { font-weight: 600; }
+.body { grid-row: 3; display: grid; grid-template-columns: 216px 1fr 272px; min-height: 0; }
 
 /* ---------- top bar ---------- */
 .topbar {

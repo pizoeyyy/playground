@@ -12,6 +12,7 @@ export function describeOp(op: Op): string {
   if (op.kind === 'style' && op.prop) lines.push(`    ${op.prop}: ${op.before ?? '?'} -> ${op.after}`);
   if (op.kind === 'text') lines.push(`    text: ${JSON.stringify(op.before)} -> ${JSON.stringify(op.after)}`);
   if (op.kind === 'move') lines.push(`    dragged offset (a rough hint, not pixels to copy): ${op.after}`);
+  if (op.kind === 'resize') lines.push(`    size was ${op.before}; dragged to ${op.after} (width height, auto = unchanged; a rough hint: express it with the layout)`);
   if (op.insert) {
     lines.push(`    new ${op.insert.kind ?? 'element'} ${op.insert.position === 'append' ? 'inside' : 'after'} ${op.insert.ref}:`);
     lines.push(`    ${op.insert.html}`);
@@ -28,7 +29,9 @@ export function describeComment(c: Comment): string {
 }
 
 export function describeRound(s: Session, r: Round): string {
-  const out = [`ROUND ${r.n}  status: ${r.status}  target: ${s.target} (${s.targetKind})`, ''];
+  const out = [`ROUND ${r.n}  status: ${r.status}  target: ${s.target} (${s.targetKind})`];
+  if (s.root) out.push(`project folder: ${s.root}`);
+  out.push('');
   const slides = new Set([...r.ops.map((o) => o.slide), ...r.comments.map((c) => c.slide)]);
   for (const id of s.slides.map((x) => x.id).filter((id) => slides.has(id))) {
     out.push(`SLIDE ${slideName(s, id)}`);

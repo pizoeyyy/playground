@@ -31,6 +31,8 @@ export type State = {
   sending: boolean;
   compare: number | null; // round number being compared
   toast: string | null;
+  reloadLoop: boolean; // the page reloaded itself repeatedly; live reload + thumbnails paused
+  zoom: number; // stage scale, so handles and snapping stay a usable size on screen
 };
 
 let state: State = {
@@ -54,6 +56,8 @@ let state: State = {
   sending: false,
   compare: null,
   toast: null,
+  reloadLoop: false,
+  zoom: 1,
 };
 
 const listeners = new Set<() => void>();
@@ -74,13 +78,36 @@ export function useStore<T>(sel: (s: State) => T): T {
 
 // ---------- server ----------
 
+// Server sessions that arrive while our own actions are still in flight are held back and applied
+// once they've all landed. Applying them right away could briefly drop a slide we had just added,
+// which used to bounce the page back to slide 1 (and, on pages that redirect, over and over).
+let inflight = 0;
+let heldServer: Session | null = null;
+
 /** Apply locally (optimistic) and on the server (authoritative). */
 export function act(a: Action) {
   const s = state.session;
   if (s) setState({ session: reduce(s, a) });
-  fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) }).catch(
-    () => toast('Lost connection to the playground server'),
-  );
+  inflight++;
+  fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) })
+    .then((r) => r.json() as Promise<{ session?: Session }>)
+    .then((body) => body.session && hold(body.session))
+    .catch(() => toast('Lost connection to the playground server'))
+    .finally(() => {
+      inflight--;
+      flushServer();
+    });
+}
+
+function hold(next: Session) {
+  if (!heldServer || next.rev >= heldServer.rev) heldServer = next;
+}
+
+function flushServer() {
+  if (inflight > 0 || !heldServer) return;
+  const next = heldServer;
+  heldServer = null;
+  applyServer(next);
 }
 
 let toastTimer = 0;
@@ -99,13 +126,18 @@ export async function connect() {
   es.addEventListener('session', (e) => onServerSession(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('reload', () => {
     if (state.session?.rounds.some((r) => r.status === 'submitted')) return; // Claude is mid-edit
+    if (state.reloadLoop) return; // paused by the loop guard
     reloadFrame();
   });
 }
 
 function onServerSession(next: Session) {
+  hold(next);
+  flushServer();
+}
+
+function applyServer(next: Session) {
   const prev = state.session;
-  if (prev && next.rev < prev.rev) return;
   setState({ session: next });
   // A round Claude just finished: show the revised page.
   const finished = next.rounds.find((r) => r.status === 'applied' && prev?.rounds.find((p) => p.n === r.n)?.status === 'submitted');
@@ -120,12 +152,39 @@ function onServerSession(next: Session) {
 // ---------- the page iframe ----------
 
 let iframe: HTMLIFrameElement | null = null;
+let agentReady = false; // false while the iframe is (re)loading; messages then have nowhere to go
 export const setIframe = (el: HTMLIFrameElement | null): void => {
   iframe = el;
+  agentReady = false;
 };
 
 export function toAgent(m: ToAgent) {
+  if (!agentReady) return;
   iframe?.contentWindow?.postMessage({ [PG]: 1, ...m }, state.frameOrigin);
+}
+
+// ---------- reload-loop guard ----------
+// A page that keeps reloading itself (a file watcher reacting to something, a redirect loop)
+// gets live reload and thumbnails paused, with a banner, instead of spinning forever.
+let expectLoadUntil = 0;
+const unexpectedLoads: number[] = [];
+const expectLoad = () => (expectLoadUntil = Date.now() + 5000);
+
+function noteLoad() {
+  const now = Date.now();
+  if (now < expectLoadUntil || (pendingClick && now - pendingClick.at < 4000)) return;
+  unexpectedLoads.push(now);
+  while (unexpectedLoads.length && now - unexpectedLoads[0] > 10000) unexpectedLoads.shift();
+  if (unexpectedLoads.length >= 4 && !state.reloadLoop) {
+    setState({ reloadLoop: true });
+    toAgent({ type: 'thumbs', on: false });
+  }
+}
+
+export function resumeAfterLoop() {
+  unexpectedLoads.length = 0;
+  setState({ reloadLoop: false });
+  toAgent({ type: 'thumbs', on: true });
 }
 
 export const currentSlide = (): Slide | undefined => state.session?.slides.find((s) => s.id === state.current);
@@ -142,6 +201,8 @@ export function initAgent() {
     grid: state.grid,
     gridSize: state.gridSize,
     pins: slidePins(state.current),
+    thumbs: !state.reloadLoop,
+    zoom: state.zoom,
   });
 }
 
@@ -151,6 +212,7 @@ let pendingClick: { step: Step; at: number } | null = null;
 let pendingReplay: { parentId: string; path: Step[] } | null = null;
 
 export function reloadFrame() {
+  expectLoad();
   const sl = currentSlide();
   setState((s) => ({ frameKey: s.frameKey + 1, frameUrl: sl?.url ?? '/', selected: null, rects: {} }));
 }
@@ -159,6 +221,7 @@ export function loadSlide(id: string) {
   const sl = state.session?.slides.find((s) => s.id === id);
   if (!sl) return;
   pendingClick = null;
+  expectLoad();
   setState((s) => ({
     current: id,
     frameUrl: sl.url,
@@ -225,6 +288,8 @@ export function onAgentMessage(e: MessageEvent) {
   const m = e.data as FromAgent;
   switch (m.type) {
     case 'ready': {
+      agentReady = true;
+      noteLoad();
       onNavigated(m.url, 'load', m.title);
       initAgent();
       if (pendingReplay && pendingReplay.parentId === state.current) {

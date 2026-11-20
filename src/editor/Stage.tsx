@@ -6,6 +6,7 @@ import {
   closeMenu,
   toAgent,
   DEVICE_WIDTH,
+  getState,
   setMode,
   focusComment,
   setIframe,
@@ -33,6 +34,13 @@ export function Stage() {
   const width = DEVICE_WIDTH[device];
   const scale = Math.min(1, (size.w - 64) / width);
   const height = Math.max(400, (size.h - 48) / scale);
+
+  // The page draws handles and snaps in its own pixels; tell it the zoom so they stay usable on screen.
+  useEffect(() => {
+    if (getState().zoom === scale) return;
+    setState({ zoom: scale });
+    toAgent({ type: 'zoom', scale });
+  }, [scale]);
 
   return (
     <main className="stage" ref={ref} data-mode={mode}>

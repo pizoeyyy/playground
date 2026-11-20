@@ -31,7 +31,7 @@ const TYPES: Record<string, string> = {
 
 const NO_STORE = { 'cache-control': 'no-store' };
 
-type Opts = { agentFile: string; editorOrigin: string };
+type Opts = { agentFile: string; editorOrigin: string; served?: Set<string> };
 
 function serveAgent(res: http.ServerResponse, agentFile: string) {
   res.writeHead(200, { 'content-type': TYPES['.js'], ...NO_STORE });
@@ -72,6 +72,7 @@ export function staticFrame(targetFile: string, o: Opts): http.Server {
       }
       file = entry;
     }
+    o.served?.add(file); // live reload watches only what the page actually loaded
     const ext = path.extname(file).toLowerCase();
     const type = TYPES[ext] ?? 'application/octet-stream';
     if (ext === '.html' || ext === '.htm') {
@@ -153,32 +154,19 @@ export function proxyFrame(targetUrl: string, o: Opts & { frameOrigin: () => str
   return server;
 }
 
-/** Cheap change signature for a folder tree (mtimes), for live reload of file targets. */
-export function folderSignature(root: string, maxDepth = 3, maxEntries = 2000): string {
-  let n = 0;
-  let sum = 0;
-  const walk = (dir: string, depth: number) => {
-    let entries: fs.Dirent[];
+/**
+ * Change signature for live reload: the mtimes of the files the page actually loaded.
+ * Watching a whole folder tree reloaded the page whenever anything nearby changed
+ * (home folders, Downloads, OneDrive, .next/.cache build output...).
+ */
+export function filesSignature(files: Iterable<string>): string {
+  let out = '';
+  for (const f of files) {
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      out += `${f}:${fs.statSync(f).mtimeMs};`;
     } catch {
-      return;
+      out += `${f}:gone;`;
     }
-    for (const e of entries) {
-      if (n++ > maxEntries) return;
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === '.playground') continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (depth < maxDepth) walk(p, depth + 1);
-      } else {
-        try {
-          sum += fs.statSync(p).mtimeMs;
-        } catch {
-          /* vanished */
-        }
-      }
-    }
-  };
-  walk(root, 0);
-  return `${n}:${sum}`;
+  }
+  return out;
 }

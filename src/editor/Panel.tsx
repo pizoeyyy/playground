@@ -156,7 +156,12 @@ function Inspector() {
         <NumberField label="X" value={sel.translate.x} onCommit={(x) => toAgent({ type: 'nudge', selector: s, x, y: sel.translate.y })} />
         <NumberField label="Y" value={sel.translate.y} onCommit={(y) => toAgent({ type: 'nudge', selector: s, x: sel.translate.x, y })} />
       </div>
-      <p className="muted small">Drag on the page to move. It snaps to the grid and to neighbours; hold Alt to place freely. Claude turns rough moves into clean layout.</p>
+      <h4>Size</h4>
+      <div className="row">
+        <NumberField label="W" value={sel.rect.w} onCommit={(w) => toAgent({ type: 'resize', selector: s, w: Math.max(1, w), h: null })} />
+        <NumberField label="H" value={sel.rect.h} onCommit={(h) => toAgent({ type: 'resize', selector: s, w: null, h: Math.max(1, h) })} />
+      </div>
+      <p className="muted small">Drag on the page to move; drag the handles to resize (Shift keeps proportions). Both snap to the grid, to neighbours' edges and to sibling sizes; hold Alt to place freely. Claude turns rough moves and sizes into clean layout.</p>
 
       <h4>Element</h4>
       <div className="row wrap">

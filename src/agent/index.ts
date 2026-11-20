@@ -171,24 +171,29 @@ function boot() {
   }
 
   // ---------- overlay (shadow DOM, never part of the page) ----------
+  const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  let zoom = 1; // the editor's stage scale; overlay chrome and snap distances are divided by it
+  const applyZoom = () => host.style.setProperty('--s', String(1 / zoom));
   const host = document.createElement('pg-overlay');
   host.setAttribute('style', 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block;');
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${OVERLAY_CSS}</style>
     <div class="grid"></div>
     <div class="box hover"></div>
-    <div class="box sel"><span class="tag"></span></div>
+    <div class="box sel"><span class="tag"></span><span class="dim"></span>${HANDLES.map((h) => `<div class="h" data-h="${h}"></div>`).join('')}</div>
     <div class="guides"></div>`;
   const $ = <T extends HTMLElement>(s: string) => root.querySelector(s) as T;
   const hoverBox = $('.hover');
   const selBox = $('.sel');
   const selTag = $('.tag');
+  const selDim = $('.dim');
   const guides = $('.guides');
   const gridEl = $('.grid');
   const cursorStyle = document.createElement('style');
   cursorStyle.id = 'pg-cursor';
 
   const mount = () => {
+    applyZoom();
     document.documentElement.appendChild(host);
     (document.head ?? document.documentElement).appendChild(cursorStyle);
     applyMode();
@@ -213,6 +218,12 @@ function boot() {
   function frame() {
     place(hoverBox, mode === 'interact' || hovered === selected ? null : hovered);
     place(selBox, selected);
+    if (selected && selected.isConnected) {
+      const r = selected.getBoundingClientRect();
+      selDim.textContent = `${Math.round(r.width)} × ${Math.round(r.height)}`;
+      const canResize = mode === 'select' && !editing && selected !== document.body && selected !== document.documentElement;
+      selBox.toggleAttribute('data-handles', canResize);
+    }
     if (gridOn) gridEl.style.backgroundPosition = `${-scrollX % gridSize}px ${-scrollY % gridSize}px`;
     requestAnimationFrame(frame);
   }
@@ -277,7 +288,8 @@ function boot() {
     }
     const el = q(op.selector);
     if (!el) return;
-    if (op.kind === 'text') setText(el, op.after ?? '');
+    if (op.kind === 'resize') applySize(el as HTMLElement, op.after ?? '', op.afterTranslate);
+    else if (op.kind === 'text') setText(el, op.after ?? '');
     else if (op.prop) (el as HTMLElement).style.setProperty(op.prop, op.after ?? '', op.kind === 'move' ? '' : 'important');
     applied.set(op.id, op);
   }
@@ -289,8 +301,177 @@ function boot() {
     if (op.kind === 'insert' || op.kind === 'duplicate') {
       if (selected && (selected === el || el.contains(selected))) select(null);
       el.remove();
-    } else if (op.kind === 'text') setText(el, op.before ?? '');
+    } else if (op.kind === 'resize') restoreSize(el, op.beforeInline);
+    else if (op.kind === 'text') setText(el, op.before ?? '');
     else if (op.prop) restoreInline(el, op.prop, op.beforeInline);
+  }
+
+  // ---------- resizing ----------
+  // A resize op stores CSS values: after = "<width> <height>" ("auto" = untouched), plus an optional
+  // translate that keeps the anchored edge still. beforeInline is JSON of the three inline values.
+  function applySize(el: HTMLElement, after: string, translate?: string) {
+    const [w, h] = after.split(' ');
+    if (w && w !== 'auto') el.style.setProperty('width', w, 'important');
+    if (h && h !== 'auto') el.style.setProperty('height', h, 'important');
+    if (translate) el.style.setProperty('translate', translate);
+  }
+  function restoreSize(el: Element, saved?: string) {
+    let v: Record<string, string> = {};
+    try {
+      v = JSON.parse(saved || '{}');
+    } catch {
+      /* nothing saved */
+    }
+    for (const prop of ['width', 'height', 'translate']) restoreInline(el, prop, v[prop]);
+  }
+  const savedSize = (el: Element) =>
+    JSON.stringify({ width: inlineOf(el, 'width'), height: inlineOf(el, 'height'), translate: inlineOf(el, 'translate') });
+  const px = (v: string) => parseFloat(v) || 0;
+  /** Border-box size -> the CSS width/height to set, honouring box-sizing. */
+  function boxExtra(el: Element) {
+    const cs = getComputedStyle(el);
+    if (cs.boxSizing === 'border-box') return { w: 0, h: 0 };
+    return {
+      w: px(cs.paddingLeft) + px(cs.paddingRight) + px(cs.borderLeftWidth) + px(cs.borderRightWidth),
+      h: px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth),
+    };
+  }
+
+  type Resize = {
+    el: HTMLElement;
+    h: string;
+    sx: number;
+    sy: number;
+    r0: DOMRect;
+    saved: string;
+    extra: { w: number; h: number };
+    xs: number[];
+    ys: number[];
+    sizes: { el: Element; w: number; h: number }[];
+    moved: boolean;
+    match: string;
+  };
+  let rz: Resize | null = null;
+
+  root.addEventListener('pointerdown', (ev) => {
+    const e = ev as PointerEvent;
+    const handle = (e.target as HTMLElement).closest?.('.h') as HTMLElement | null;
+    if (!handle || !selected || mode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = selected as HTMLElement;
+    const { xs, ys } = snapLines(el);
+    const sizes = el.parentElement
+      ? [...el.parentElement.children].filter((c) => c !== el && visible(c)).map((c) => {
+          const r = c.getBoundingClientRect();
+          return { el: c, w: r.width, h: r.height };
+        })
+      : [];
+    rz = { el, h: handle.dataset.h!, sx: e.clientX, sy: e.clientY, r0: el.getBoundingClientRect(), saved: savedSize(el), extra: boxExtra(el), xs, ys, sizes, moved: false, match: '' };
+  });
+
+  function snapEdge(v: number, lines: number[], scroll: number): [number, number | null] {
+    const thr = SNAP / zoom;
+    let best: number | null = null;
+    for (const l of lines) if (Math.abs(l - v) <= thr && (best === null || Math.abs(l - v) < Math.abs(best - v))) best = l;
+    if (best !== null) return [best, best];
+    return [Math.round((v + scroll) / gridSize) * gridSize - scroll, null];
+  }
+
+  function resizeMove(e: PointerEvent) {
+    const r = rz!;
+    const dx = e.clientX - r.sx;
+    const dy = e.clientY - r.sy;
+    if (!r.moved && Math.hypot(dx, dy) < 2) return;
+    r.moved = true;
+    const snap = !e.altKey;
+    let { left, top, right, bottom } = r.r0;
+    let gx: number | null = null;
+    let gy: number | null = null;
+    const E = r.h.includes('e'), W = r.h.includes('w'), N = r.h.includes('n'), S = r.h.includes('s');
+    if (E) [right, gx] = snap ? snapEdge(right + dx, r.xs, scrollX) : [right + dx, null];
+    if (W) [left, gx] = snap ? snapEdge(left + dx, r.xs, scrollX) : [left + dx, null];
+    if (S) [bottom, gy] = snap ? snapEdge(bottom + dy, r.ys, scrollY) : [bottom + dy, null];
+    if (N) [top, gy] = snap ? snapEdge(top + dy, r.ys, scrollY) : [top + dy, null];
+    let w = Math.max(8, right - left);
+    let h = Math.max(8, bottom - top);
+    r.match = '';
+    if (snap) {
+      const thr = SNAP / zoom;
+      const mw = (E || W) && r.sizes.find((x) => Math.abs(x.w - w) <= thr);
+      if (mw) {
+        w = mw.w;
+        r.match = `, same width as ${describe(mw.el)}`;
+      }
+      const mh = (N || S) && r.sizes.find((x) => Math.abs(x.h - h) <= thr);
+      if (mh) {
+        h = mh.h;
+        r.match += `, same height as ${describe(mh.el)}`;
+      }
+    }
+    if (e.shiftKey && (E || W) && (N || S)) h = w * (r.r0.height / r.r0.width);
+    // Where the box should end up: the edges opposite the handle stay put.
+    const wantLeft = W ? r.r0.right - w : r.r0.left;
+    const wantTop = N ? r.r0.bottom - h : r.r0.top;
+    restoreSize(r.el, r.saved);
+    applySize(r.el, `${E || W ? `${Math.round(w - r.extra.w)}px` : 'auto'} ${N || S ? `${Math.round(h - r.extra.h)}px` : 'auto'}`);
+    const now = r.el.getBoundingClientRect();
+    const t = parseTranslate(r.el.style.translate || '');
+    const fx = Math.round(wantLeft - now.left);
+    const fy = Math.round(wantTop - now.top);
+    if (fx || fy) r.el.style.setProperty('translate', `${t.x + fx}px ${t.y + fy}px`);
+    drawGuides(gx, gy);
+  }
+
+  function endResize() {
+    const r = rz!;
+    rz = null;
+    drawGuides(null, null);
+    if (!r.moved) return;
+    const before = JSON.parse(r.saved) as Record<string, string>;
+    const w = r.el.style.getPropertyValue('width') && inlineOf(r.el, 'width') !== before.width ? r.el.style.getPropertyValue('width') : 'auto';
+    const h = r.el.style.getPropertyValue('height') && inlineOf(r.el, 'height') !== before.height ? r.el.style.getPropertyValue('height') : 'auto';
+    const tr = inlineOf(r.el, 'translate') !== before.translate ? r.el.style.translate : undefined;
+    emitResize(r.el, r.r0, `${w} ${h}`, tr, r.saved, r.match, false);
+  }
+
+  function emitResize(el: HTMLElement, r0: DOMRect, after: string, translate: string | undefined, saved: string, match: string, coalesce: boolean) {
+    const selector = selectorOf(el);
+    const merged = coalesce ? mergeBase(selector, 'resize', 'size') : null;
+    const r = el.getBoundingClientRect();
+    const parent = el.parentElement;
+    let fill = '';
+    if (parent) {
+      const pr = parent.getBoundingClientRect();
+      const cs = getComputedStyle(parent);
+      const inner = pr.width - px(cs.paddingLeft) - px(cs.paddingRight) - px(cs.borderLeftWidth) - px(cs.borderRightWidth);
+      if (Math.abs(r.width - inner) <= 2) fill = ', now fills its container width';
+    }
+    const was = merged?.before ?? `${Math.round(r0.width)} × ${Math.round(r0.height)}`;
+    emit({
+      id: merged?.id ?? newId('o'),
+      kind: 'resize',
+      selector,
+      element: describe(el),
+      label: `Resized ${describe(el)} to ${Math.round(r.width)} × ${Math.round(r.height)} (was ${was})${match}${fill}`,
+      prop: 'size',
+      before: was,
+      after,
+      afterTranslate: translate,
+      beforeInline: merged?.beforeInline ?? saved,
+      neighbours: neighboursOf(el),
+      coalesce,
+    });
+  }
+
+  /** From the inspector's W/H fields: border-box pixels, null = leave that dimension alone. */
+  function resizeTo(el: HTMLElement, w: number | null, h: number | null) {
+    const r0 = el.getBoundingClientRect();
+    const saved = savedSize(el);
+    const extra = boxExtra(el);
+    const after = `${w === null ? 'auto' : `${Math.round(Math.max(1, w - extra.w))}px`} ${h === null ? 'auto' : `${Math.round(Math.max(1, h - extra.h))}px`}`;
+    applySize(el, after);
+    emitResize(el, r0, after, undefined, saved, '', true);
   }
 
   function neighboursOf(el: Element): Neighbour[] {
@@ -659,7 +840,7 @@ function boot() {
     for (const o of own)
       for (const l of lines) {
         const adj = l - o;
-        if (Math.abs(adj) <= SNAP && (!best || Math.abs(adj) < Math.abs(best.adj))) best = { adj, line: l };
+        if (Math.abs(adj) <= SNAP / zoom && (!best || Math.abs(adj) < Math.abs(best.adj))) best = { adj, line: l };
       }
     if (best) return { d: d + best.adj, guide: best.line };
     const doc = start + d + scroll;
@@ -673,6 +854,7 @@ function boot() {
   }
 
   function onPointerMove(e: PointerEvent) {
+    if (rz) return resizeMove(e);
     if (mode !== 'interact' && !drag && !isOurs(e)) {
       const t = pick(e.target);
       if (t !== hovered) hovered = t;
@@ -699,6 +881,7 @@ function boot() {
   }
 
   function endDrag() {
+    if (rz) return endResize();
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -852,11 +1035,13 @@ function boot() {
 
   // ---------- thumbnails ----------
   let thumbTimer = 0;
+  let thumbsOn = true;
   function scheduleThumb(delay = 1200) {
     clearTimeout(thumbTimer);
     thumbTimer = window.setTimeout(capture, delay);
   }
-  async function capture() {
+  async function capture(force = false) {
+    if (!thumbsOn && !force) return;
     try {
       const bg = getComputedStyle(document.body).backgroundColor;
       const dataUrl = await domToJpeg(document.documentElement, {
@@ -912,6 +1097,9 @@ function boot() {
         gridOn = m.grid;
         gridSize = m.gridSize;
         pins = m.pins;
+        thumbsOn = m.thumbs;
+        zoom = m.zoom || 1;
+        applyZoom();
         whenReady(() => {
           const want = new Set(m.ops.map((o) => o.id));
           for (const op of [...applied.values()].reverse()) if (!want.has(op.id)) revertOp(op);
@@ -927,6 +1115,18 @@ function boot() {
         hideMenu();
         applyMode();
         break;
+      case 'thumbs':
+        thumbsOn = m.on;
+        break;
+      case 'zoom':
+        zoom = m.scale || 1;
+        applyZoom();
+        break;
+      case 'resize': {
+        const el = q(m.selector);
+        if (el) resizeTo(el as HTMLElement, m.w, m.h);
+        break;
+      }
       case 'grid':
         gridOn = m.show;
         gridSize = m.size;
@@ -992,7 +1192,7 @@ function boot() {
         whenReady(() => replay(m.path));
         break;
       case 'capture':
-        capture();
+        capture(true);
         break;
       case 'menuClosed':
         menuShown = false;

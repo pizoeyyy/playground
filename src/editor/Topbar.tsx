@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { COMPONENTS, componentLabel } from '../shared/components.ts';
 import { canUndo, openRound, pendingCount } from '../shared/session.ts';
 import type { Mode } from '../shared/protocol.ts';
-import { IconAdd, IconComment, IconGrid, IconInteract, IconRedo, IconSelect, IconSend, IconUndo } from './icons.tsx';
-import { type Device, redo, saveAndSend, setMode, setState, startAdd, toggleGrid, undo, useStore } from './store.ts';
+import { IconAdd, IconAlign, IconComment, IconGrid, IconInteract, IconRedo, IconSelect, IconSend, IconUndo } from './icons.tsx';
+import { autoAlign, type Device, redo, saveAndSend, setMode, setState, startAdd, toggleGrid, undo, useStore } from './store.ts';
 
 const TOOLS: { mode: Mode; label: string; shortcut: string; Icon: () => React.JSX.Element }[] = [
   { mode: 'select', label: 'Select and move', shortcut: 'V', Icon: IconSelect },
@@ -99,6 +99,10 @@ export function Topbar() {
         <span className="divider" />
         <button className="tool" data-active={grid || undefined} aria-pressed={grid} title="Grid and snapping guides (')" onClick={toggleGrid}>
           <IconGrid />
+        </button>
+        <button className="align-btn" title="Line up everything you moved, resized or added (Shift+A)" onClick={autoAlign}>
+          <IconAlign />
+          Auto align
         </button>
       </div>
 

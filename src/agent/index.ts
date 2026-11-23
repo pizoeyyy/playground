@@ -298,7 +298,7 @@ function boot() {
     }
     const el = q(op.selector);
     if (!el) return;
-    if (op.kind === 'resize') applySize(el as HTMLElement, op.after ?? '', op.afterTranslate);
+    if (op.kind === 'resize') applySize(el as HTMLElement, op.after ?? '', op.afterTranslate, op.afterMargin);
     else if (op.kind === 'text') setText(el, op.after ?? '');
     else if (op.prop) (el as HTMLElement).style.setProperty(op.prop, op.after ?? '', op.kind === 'move' ? '' : 'important');
     applied.set(op.id, op);
@@ -320,12 +320,33 @@ function boot() {
   // ---------- resizing ----------
   // A resize op stores CSS values: after = "<width> <height>" ("auto" = untouched), plus an optional
   // translate that keeps the anchored edge still. beforeInline is JSON of the three inline values.
-  function applySize(el: HTMLElement, after: string, translate?: string) {
+  function applySize(el: HTMLElement, after: string, translate?: string, margin?: string) {
     const [w, h] = after.split(' ');
     if (w && w !== 'auto') el.style.setProperty('width', w, 'important');
     if (h && h !== 'auto') el.style.setProperty('height', h, 'important');
+    const [mr, mb] = (margin ?? '').split(' ');
+    if (mr && mr !== 'auto') el.style.setProperty('margin-right', mr, 'important');
+    if (mb && mb !== 'auto') el.style.setProperty('margin-bottom', mb, 'important');
     if (translate) el.style.setProperty('translate', translate);
   }
+
+  /**
+   * Keep an in-flow element's footprint the same after a resize, so it grows over its neighbours
+   * instead of pushing them: shrink its right/bottom margin by however much it grew.
+   */
+  function keepFootprint(el: HTMLElement, r0: DOMRect, m0: { r: number; b: number }, w: boolean, h: boolean): string | undefined {
+    const pos = getComputedStyle(el).position;
+    if (pos === 'absolute' || pos === 'fixed') return undefined;
+    const now = el.getBoundingClientRect();
+    const mr = w ? `${Math.round(m0.r - (now.width - r0.width))}px` : 'auto';
+    const mb = h ? `${Math.round(m0.b - (now.height - r0.height))}px` : 'auto';
+    applySize(el, 'auto auto', undefined, `${mr} ${mb}`);
+    return `${mr} ${mb}`;
+  }
+  const margins0 = (el: Element) => {
+    const cs = getComputedStyle(el);
+    return { r: parseFloat(cs.marginRight) || 0, b: parseFloat(cs.marginBottom) || 0 };
+  };
   function restoreSize(el: Element, saved?: string) {
     let v: Record<string, string> = {};
     try {
@@ -333,10 +354,16 @@ function boot() {
     } catch {
       /* nothing saved */
     }
-    for (const prop of ['width', 'height', 'translate']) restoreInline(el, prop, v[prop]);
+    for (const prop of ['width', 'height', 'translate', 'margin-right', 'margin-bottom']) restoreInline(el, prop, v[prop]);
   }
   const savedSize = (el: Element) =>
-    JSON.stringify({ width: inlineOf(el, 'width'), height: inlineOf(el, 'height'), translate: inlineOf(el, 'translate') });
+    JSON.stringify({
+      width: inlineOf(el, 'width'),
+      height: inlineOf(el, 'height'),
+      translate: inlineOf(el, 'translate'),
+      'margin-right': inlineOf(el, 'margin-right'),
+      'margin-bottom': inlineOf(el, 'margin-bottom'),
+    });
   const px = (v: string) => parseFloat(v) || 0;
   /** Border-box size -> the CSS width/height to set, honouring box-sizing. */
   function boxExtra(el: Element) {
@@ -361,6 +388,8 @@ function boot() {
     sizes: { el: Element; w: number; h: number }[];
     moved: boolean;
     match: string;
+    m0: { r: number; b: number };
+    margin?: string;
   };
   let rz: Resize | null = null;
 
@@ -378,7 +407,7 @@ function boot() {
           return { el: c, w: r.width, h: r.height };
         })
       : [];
-    rz = { el, h: handle.dataset.h!, sx: e.clientX, sy: e.clientY, r0: el.getBoundingClientRect(), saved: savedSize(el), extra: boxExtra(el), xs, ys, sizes, moved: false, match: '' };
+    rz = { el, h: handle.dataset.h!, sx: e.clientX, sy: e.clientY, r0: el.getBoundingClientRect(), saved: savedSize(el), extra: boxExtra(el), xs, ys, sizes, moved: false, match: '', m0: margins0(el) };
   });
 
   function snapEdge(v: number, lines: number[], scroll: number): [number, number | null] {
@@ -426,6 +455,7 @@ function boot() {
     const wantTop = N ? r.r0.bottom - h : r.r0.top;
     restoreSize(r.el, r.saved);
     applySize(r.el, `${E || W ? `${Math.round(w - r.extra.w)}px` : 'auto'} ${N || S ? `${Math.round(h - r.extra.h)}px` : 'auto'}`);
+    r.margin = keepFootprint(r.el, r.r0, r.m0, E || W, N || S);
     const now = r.el.getBoundingClientRect();
     const t = parseTranslate(r.el.style.translate || '');
     const fx = Math.round(wantLeft - now.left);
@@ -443,10 +473,10 @@ function boot() {
     const w = r.el.style.getPropertyValue('width') && inlineOf(r.el, 'width') !== before.width ? r.el.style.getPropertyValue('width') : 'auto';
     const h = r.el.style.getPropertyValue('height') && inlineOf(r.el, 'height') !== before.height ? r.el.style.getPropertyValue('height') : 'auto';
     const tr = inlineOf(r.el, 'translate') !== before.translate ? r.el.style.translate : undefined;
-    emitResize(r.el, r.r0, `${w} ${h}`, tr, r.saved, r.match, false);
+    emitResize(r.el, r.r0, `${w} ${h}`, tr, r.saved, r.match, false, r.margin);
   }
 
-  function emitResize(el: HTMLElement, r0: DOMRect, after: string, translate: string | undefined, saved: string, match: string, coalesce: boolean) {
+  function emitResize(el: HTMLElement, r0: DOMRect, after: string, translate: string | undefined, saved: string, match: string, coalesce: boolean, margin?: string) {
     const selector = selectorOf(el);
     const merged = coalesce ? mergeBase(selector, 'resize', 'size') : null;
     const r = el.getBoundingClientRect();
@@ -469,6 +499,7 @@ function boot() {
       before: was,
       after,
       afterTranslate: translate,
+      afterMargin: margin,
       beforeInline: merged?.beforeInline ?? saved,
       neighbours: neighboursOf(el),
       coalesce,
@@ -481,8 +512,10 @@ function boot() {
     const saved = savedSize(el);
     const extra = boxExtra(el);
     const after = `${w === null ? 'auto' : `${Math.round(Math.max(1, w - extra.w))}px`} ${h === null ? 'auto' : `${Math.round(Math.max(1, h - extra.h))}px`}`;
+    const m0 = margins0(el);
     applySize(el, after);
-    emitResize(el, r0, after, undefined, saved, '', true);
+    const margin = keepFootprint(el, r0, m0, w !== null, h !== null);
+    emitResize(el, r0, after, undefined, saved, '', true, margin);
   }
 
   function neighboursOf(el: Element): Neighbour[] {
@@ -508,7 +541,7 @@ function boot() {
   }
 
   /** Record a move. `el` must already be at `after`; `beforeInline` is the inline value to restore on undo. */
-  function moveOp(el: Element, before: string, after: string, beforeInline: string, coalesce: boolean) {
+  function moveOp(el: Element, before: string, after: string, beforeInline: string, coalesce: boolean, group?: string, why?: string) {
     const selector = selectorOf(el);
     const merged = coalesce ? mergeBase(selector, 'move', 'translate') : null;
     if (merged) {
@@ -529,8 +562,11 @@ function boot() {
       kind: 'move',
       selector,
       element: describe(el),
-      label: `Moved ${describe(el)} ${dir || 'in place'}${near ? `, now ${near.relation} ${near.text}` : ''}`,
+      label: group
+        ? `Auto-aligned ${describe(el)}${why ? `: ${why}` : ''}`
+        : `Moved ${describe(el)} ${dir || 'in place'}${near ? `, now ${near.relation} ${near.text}` : ''}`,
       prop: 'translate',
+      group,
       before: before || '0px 0px',
       after,
       beforeInline,
@@ -616,7 +652,23 @@ function boot() {
     }
   }
 
-  function addComponent(target: Element, kind: ComponentKind) {
+  /**
+   * Float an element at a page point without disturbing the layout around it: absolutely positioned
+   * against its containing block, snapped to the grid. Claude later puts it into the real layout.
+   */
+  function floatAt(el: HTMLElement, x: number, y: number) {
+    el.style.setProperty('position', 'absolute');
+    el.style.setProperty('z-index', '20');
+    el.style.setProperty('left', '0px');
+    el.style.setProperty('top', '0px');
+    const o = el.getBoundingClientRect();
+    const sx = Math.round((x + scrollX) / gridSize) * gridSize - scrollX;
+    const sy = Math.round((y + scrollY) / gridSize) * gridSize - scrollY;
+    el.style.setProperty('left', `${Math.round(sx - o.left)}px`);
+    el.style.setProperty('top', `${Math.round(sy - o.top)}px`);
+  }
+
+  function addComponent(target: Element, kind: ComponentKind, at?: { x: number; y: number }) {
     const container = /^(div|section|form|nav|header|footer|main|aside|li|td|article|fieldset|ul|ol|details)$/i;
     const inline = target.matches(INTERACTIVE) || !container.test(target.tagName);
     const ref = target === document.body || target === document.documentElement ? document.body : target;
@@ -630,13 +682,18 @@ function boot() {
     if (position === 'append') ref.appendChild(el);
     else ref.after(el);
     const name = componentLabel(kind);
+    let placed = html;
+    if (at) {
+      floatAt(el as HTMLElement, at.x, at.y);
+      placed = el.outerHTML;
+    }
     emit({
       id,
       kind: 'insert',
       selector: `[data-pg-id="${id}"]`,
       element: describe(el),
-      label: `Added a ${name} ${position === 'append' ? 'inside' : 'after'} ${describe(ref)}`,
-      insert: { kind: name, html, ref: selectorOf(ref), position },
+      label: `Added a ${name} ${position === 'append' ? 'inside' : 'after'} ${describe(ref)}${at ? ', placed freely over the layout' : ''}`,
+      insert: { kind: name, html: placed, ref: selectorOf(ref), position, float: !!at },
       neighbours: neighboursOf(el),
     });
     select(el);
@@ -650,15 +707,19 @@ function boot() {
     clone.removeAttribute('id');
     clone.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
     clone.setAttribute('data-pg-id', id);
-    const html = clone.outerHTML;
     el.after(clone);
+    // The copy floats just below-right of the original, so nothing else moves.
+    const r = el.getBoundingClientRect();
+    floatAt(clone as HTMLElement, r.left + gridSize * 2, r.top + gridSize * 2);
+    (clone as HTMLElement).style.setProperty('width', `${Math.round(r.width - boxExtra(el).w)}px`);
+    const html = clone.outerHTML;
     emit({
       id,
       kind: 'duplicate',
       selector: `[data-pg-id="${id}"]`,
       element: describe(el),
-      label: `Duplicated ${describe(el)}`,
-      insert: { html, ref: selectorOf(el), position: 'after' },
+      label: `Duplicated ${describe(el)}, placed freely over the layout`,
+      insert: { html, ref: selectorOf(el), position: 'after', float: true },
       neighbours: neighboursOf(clone),
     });
     select(clone);
@@ -972,7 +1033,7 @@ function boot() {
               moved: false,
             };
           } else if (mode === 'add') {
-            addComponent(t, addKind);
+            addComponent(t, addKind, { x: pe.clientX, y: pe.clientY });
             setMode('select');
           } else if (mode === 'comment') {
             compose('comment', t);
@@ -1055,6 +1116,88 @@ function boot() {
     const t = parseTranslate((el as HTMLElement).style.translate || '');
     nudgeTo(el, t.x + a[0] * step, t.y + a[1] * step);
     return true;
+  }
+
+  // ---------- auto align ----------
+  /**
+   * Tidy everything the user moved, resized or placed on this page: line edges and centres up with
+   * neighbours, even out gaps, step off overlaps, else snap to the grid. One undo step (a group).
+   */
+  const GAPS = [8, 12, 16, 24, 32];
+  const nearestGap = (g: number) => GAPS.reduce((a, b) => (Math.abs(b - g) < Math.abs(a - g) ? b : a));
+  type Box = { l: number; t: number; r: number; b: number; el: Element };
+  const boxOf = (el: Element): Box => {
+    const r = el.getBoundingClientRect();
+    return { l: r.left, t: r.top, r: r.right, b: r.bottom, el };
+  };
+
+  function alignAxis(me: Box, refs: Box[], axis: 'x' | 'y'): { d: number; why: string } {
+    const [lo, hi] = axis === 'x' ? (['l', 'r'] as const) : (['t', 'b'] as const);
+    const [clo, chi] = axis === 'x' ? (['t', 'b'] as const) : (['l', 'r'] as const);
+    const mid = (b: Box) => (b[lo] + b[hi]) / 2;
+    const cands: { d: number; why: string }[] = [];
+    for (const ref of refs) {
+      const name = describe(ref.el);
+      const crossOverlap = Math.min(me[chi], ref[chi]) - Math.max(me[clo], ref[clo]);
+      const crossGap = Math.max(me[clo] - ref[chi], ref[clo] - me[chi]);
+      if (crossOverlap > 0) {
+        // Same row (x) or column (y): sit next to it with a standard gap.
+        const after = me[lo] - ref[hi];
+        const before = ref[lo] - me[hi];
+        if (after > -4 && after < 80) cands.push({ d: ref[hi] + nearestGap(Math.max(0, after)) - me[lo], why: `${nearestGap(Math.max(0, after))}px ${axis === 'x' ? 'right of' : 'below'} ${name}` });
+        if (before > -4 && before < 80) cands.push({ d: ref[lo] - nearestGap(Math.max(0, before)) - me[hi], why: `${nearestGap(Math.max(0, before))}px ${axis === 'x' ? 'left of' : 'above'} ${name}` });
+      }
+      if (crossGap < 240) {
+        // Stacked the other way: line up edges or centres.
+        cands.push({ d: ref[lo] - me[lo], why: `${axis === 'x' ? 'left' : 'top'} edge with ${name}` });
+        cands.push({ d: ref[hi] - me[hi], why: `${axis === 'x' ? 'right' : 'bottom'} edge with ${name}` });
+        cands.push({ d: mid(ref) - mid(me), why: `centred with ${name}` });
+      }
+    }
+    const best = cands.filter((c) => Math.abs(c.d) <= 40).sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0];
+    if (best) return { d: Math.round(best.d), why: best.why };
+    const scroll = axis === 'x' ? scrollX : scrollY;
+    const v = me[lo] + scroll;
+    return { d: Math.round(Math.round(v / gridSize) * gridSize - v), why: 'on the grid' };
+  }
+
+  function autoAlign() {
+    const kinds = new Set(['move', 'insert', 'duplicate', 'resize']);
+    const els = [...new Set([...applied.values()].filter((o) => kinds.has(o.kind)).map((o) => q(o.selector)))].filter(
+      (e): e is HTMLElement => !!e && e.isConnected && visible(e),
+    );
+    if (!els.length) return post({ type: 'aligned', count: 0 });
+    const group = newId('g');
+    let count = 0;
+    for (const el of els) {
+      const parent = el.parentElement;
+      const refs: Box[] = [];
+      for (const c of parent ? [...parent.children] : [])
+        if (c !== el && !c.contains(el) && !el.contains(c) && visible(c)) refs.push(boxOf(c));
+      for (const o of els) if (o !== el && !refs.some((r) => r.el === o)) refs.push(boxOf(o));
+      let me = boxOf(el);
+      const ax = alignAxis(me, refs, 'x');
+      me = { ...me, l: me.l + ax.d, r: me.r + ax.d };
+      const ay = alignAxis(me, refs, 'y');
+      me = { ...me, t: me.t + ay.d, b: me.b + ay.d };
+      // Still sitting on top of something that wasn't moved? Step below it.
+      let dy = ay.d;
+      let why = [ax.d && ax.why, ay.d && ay.why].filter(Boolean).join(', ');
+      const hit = refs.find((r) => !els.includes(r.el as HTMLElement) && Math.min(me.r, r.r) - Math.max(me.l, r.l) > 4 && Math.min(me.b, r.b) - Math.max(me.t, r.t) > 4);
+      if (hit) {
+        const push = Math.round(hit.b + 16 - me.t);
+        dy += push;
+        why = [why, `moved below ${describe(hit.el)} so they don't overlap`].filter(Boolean).join(', ');
+      }
+      if (!ax.d && !dy) continue;
+      const beforeInline = inlineOf(el, 'translate');
+      const t = parseTranslate(el.style.translate || '');
+      const after = `${t.x + ax.d}px ${t.y + dy}px`;
+      el.style.setProperty('translate', after);
+      moveOp(el, `${t.x}px ${t.y}px`, after, beforeInline, false, group, why);
+      count++;
+    }
+    post({ type: 'aligned', count });
   }
 
   // ---------- frozen copies ----------
@@ -1287,13 +1430,16 @@ function boot() {
       case 'menuClosed':
         menuShown = false;
         break;
+      case 'autoAlign':
+        autoAlign();
+        break;
       case 'freeze':
         post({ type: 'frozen', req: m.req, html: snapshotHtml(), version, loadId: LOAD_ID, url: here(), title: document.title, frozen: FROZEN });
         break;
       case 'place': {
         // The editor catches placement clicks itself, so a busy page can't mis-order them.
         const t = pick(document.elementFromPoint(m.x, m.y)) ?? document.body;
-        if (m.what === 'add') addComponent(t, m.kind);
+        if (m.what === 'add') addComponent(t, m.kind, { x: m.x, y: m.y });
         else compose('comment', t);
         break;
       }

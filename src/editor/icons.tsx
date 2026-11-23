@@ -21,6 +21,9 @@ export const IconRedo = () => (
 export const IconGrid = () => (
   <svg {...S}><path d="M2.5 6h11M2.5 10h11M6 2.5v11M10 2.5v11" /></svg>
 );
+export const IconAlign = () => (
+  <svg {...S}><path d="M2.5 2.5v11" /><rect x="5" y="4" width="8" height="3" rx="1" /><rect x="5" y="9" width="5" height="3" rx="1" /></svg>
+);
 export const IconSend = () => (
   <svg {...S}><path d="M14 2L7 9M14 2l-4.5 12L7 9 2 6.5z" /></svg>
 );

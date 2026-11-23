@@ -180,6 +180,7 @@ function Shortcuts() {
     ['I', 'Interact with the page'],
     ['A', 'Add menu (card, dropdown, popup, ...)'],
     ['B', 'Add a button'],
+    ['Shift A', 'Auto align'],
     ['C', 'Comment'],
     ["'", 'Grid'],
     ['Ctrl Z', 'Undo'],

@@ -3,6 +3,8 @@
 A Figma-like review editor for HTML, built for Claude Code. Open a `/prototype` file or your running app, click around it, mark it up, and hand the changes to Claude in one batch. Works on Windows, macOS and Linux.
 
 - **Select, recolour, edit text, drag and resize.** Moves and resizes snap to an 8px grid, to neighbouring edges and to sibling sizes, with guides. Shift keeps proportions while resizing; hold Alt to place freely.
+- **Things can overlap while you sketch.** New and duplicated elements float where you put them, and resizes grow over neighbours instead of pushing them, so nothing else moves by accident.
+- **Auto align** (toolbar button, `Shift+A`) tidies everything you moved, resized or added: lines up edges and centres with neighbours, evens out gaps, and steps things off overlaps. One `Ctrl+Z` undoes it. Claude aligns properly in the real code either way, and fixes clearly misaligned spacing in the containers it touches.
 - **Add things from a palette** (`A`): button, card, dropdown, menu, popup, input, toggle, tabs, banner, badge, heading, text, list, image. Pick one, then click the page to drop it.
 - **Say what it should do.** Right-click any new or existing element → **Describe behavior…** ("on click, open the confirm popup; Cancel closes it"). Claude builds the real interaction from that note.
 - **Undo everything** with `Ctrl+Z` / `Ctrl+Shift+Z`, or the toolbar buttons.

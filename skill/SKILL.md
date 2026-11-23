@@ -125,7 +125,11 @@ Revert **only that item's change**, keeping every other item's change (including
 
 ### 4. Auto-align
 
-The user drops things roughly and the editor snaps to a grid, but the code must come out clean.
+The user drops things roughly and the editor snaps to a grid, but the code must come out clean. **Always align, whether or not the user pressed Auto align.** The editor lets elements overlap while you sketch, and new or duplicated elements float freely (absolute in the editor only). None of that is what the user wants shipped.
+
+- **Placed freely** (INSERT/DUPLICATE marked "placed freely") and **Auto-aligned** moves: read where it sits and what it lines up with, then put it into the real layout there (the right flex/grid container, in order), not `position: absolute`.
+- **Overlaps** in the editor are never intentional. If something ends up on top of another element, give it its own space in the layout.
+- **Heavily misaligned surroundings**: in every container you touch, also fix what is clearly off. Edges a few pixels apart that should line up, uneven gaps between siblings, ragged baselines, mismatched heights in a row. Use the project's spacing scale. Mention it in the note ("also evened the gaps in the actions row to 12px"). Don't restyle containers you didn't touch.
 
 - Read a move's **intent** from its neighbours ("now below Pay", "now right of Back") and its direction. It may be a reorder within a row or column, a spacing change, or a move into another container.
 - Use the existing layout system: flex/grid order and gap, the project's spacing tokens, existing alignment utilities.

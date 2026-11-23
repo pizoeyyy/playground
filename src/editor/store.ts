@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { activeOps, appliedIn, canUndo, newId, reduce } from '../shared/session.ts';
+import { activeOps, appliedIn, canUndo, newId, openRound as openRoundOf, reduce } from '../shared/session.ts';
 import { PG, type ElementInfo, type FromAgent, type Mode, type Rect, type ToAgent } from '../shared/protocol.ts';
 import type { ComponentKind } from '../shared/components.ts';
 import type { Action, CommentType, Op, Session, Slide, Step } from '../shared/types.ts';
@@ -355,6 +355,9 @@ export function onAgentMessage(e: MessageEvent) {
     case 'notice':
       toast(m.text);
       break;
+    case 'aligned':
+      toast(m.count ? `Aligned ${m.count} element${m.count === 1 ? '' : 's'}. Ctrl+Z undoes it.` : 'Nothing to align yet: move, resize or add something first.');
+      break;
     case 'menu':
       setState({ menu: m, composer: null, openThread: null });
       break;
@@ -430,6 +433,9 @@ export function undo() {
   act({ type: 'undo' });
   if (op.slide === state.current) toAgent({ type: 'revert', op });
   else toast(`Undid "${op.label}" on ${slideName(op.slide)}`);
+  // Ops made together (one auto align) undo as one step.
+  const next = state.session && state.session.undoPointer > 0 ? state.session.ops[state.session.undoPointer - 1] : null;
+  if (op.group && next?.group === op.group && state.session && canUndo(state.session)) undo();
 }
 
 export function redo() {
@@ -439,6 +445,14 @@ export function redo() {
   act({ type: 'redo' });
   if (op.slide === state.current) toAgent({ type: 'apply', op });
   else toast(`Redid "${op.label}" on ${slideName(op.slide)}`);
+  const next = state.session?.ops[state.session.undoPointer];
+  if (op.group && next?.group === op.group) redo();
+}
+
+/** Tidy everything moved, resized or placed on this slide (edges, gaps, overlaps). */
+export function autoAlign() {
+  if (state.session && openRoundOf(state.session)) return toast('Claude is working on the last round; align after it lands.');
+  toAgent({ type: 'autoAlign' });
 }
 
 export async function saveAndSend() {
@@ -573,6 +587,7 @@ export function handleKey(key: string, ctrl: boolean, shift: boolean) {
   if (k === 'v') setMode('select');
   else if (k === 'i') setMode('interact');
   else if (k === 'b') startAdd('button');
+  else if (k === 'a' && shift) autoAlign();
   else if (k === 'a') setState({ palette: !state.palette });
   else if (k === 'c') setMode('comment');
   else if (key === "'") toggleGrid();

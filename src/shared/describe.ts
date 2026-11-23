@@ -16,6 +16,7 @@ export function describeOp(op: Op): string {
   if (op.insert) {
     lines.push(`    new ${op.insert.kind ?? 'element'} ${op.insert.position === 'append' ? 'inside' : 'after'} ${op.insert.ref}:`);
     lines.push(`    ${op.insert.html}`);
+    if (op.insert.float) lines.push(`    placed freely: it floats over the layout in the editor (absolute position is only the editor's). Put it into the real layout where it sits, aligned with its neighbours.`);
   }
   for (const n of op.neighbours ?? []) lines.push(`    now ${n.relation} ${n.text}  (${n.selector})`);
   return lines.join('\n');

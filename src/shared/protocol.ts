@@ -31,6 +31,7 @@ export type FromAgent =
   | { type: 'thumb'; dataUrl: string; slide?: string }
   | { type: 'frozen'; req: number; html: string; version: number; loadId: string; url: string; title: string; frozen: boolean }
   | { type: 'notice'; text: string }
+  | { type: 'aligned'; count: number }
   | { type: 'mode'; mode: Mode }
   | { type: 'menu'; x: number; y: number; selector: string; element: string; rect: Rect; clickable: boolean; hasText: boolean; hasParent: boolean }
   | { type: 'dismiss' }
@@ -54,6 +55,7 @@ export type ToAgent =
   | { type: 'replay'; path: Step[] }
   | { type: 'capture'; slide?: string }
   | { type: 'freeze'; req: number }
+  | { type: 'autoAlign' }
   | { type: 'menuClosed' }
   | { type: 'place'; x: number; y: number; what: 'add' | 'comment'; kind: ComponentKind }
   | { type: 'compose'; selector: string; kind: CommentType };

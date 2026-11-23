@@ -28,6 +28,7 @@ export type InsertSpec = {
   html: string; // outerHTML of the new element, carries data-pg-id
   ref: string; // selector of the reference element
   position: 'after' | 'append';
+  float?: boolean; // placed freely over the layout (absolutely positioned in the editor)
 };
 
 export type OpKind = 'style' | 'text' | 'move' | 'resize' | 'insert' | 'delete' | 'duplicate';
@@ -44,6 +45,8 @@ export type Op = {
   after?: string;
   beforeInline?: string; // exact inline value to restore on undo (resize: JSON of width/height/translate)
   afterTranslate?: string; // resize: keeps the anchored edge still
+  afterMargin?: string; // resize: "<right> <bottom>" margins that keep the old footprint, so neighbours don't move
+  group?: string; // ops made together (auto align) undo and redo as one step
   insert?: InsertSpec;
   neighbours?: Neighbour[];
   coalesce?: boolean; // may merge with an immediately preceding op on the same target

@@ -16,6 +16,8 @@ export function describeOp(op: Op): string {
   if (op.insert) {
     lines.push(`    new ${op.insert.kind ?? 'element'} ${op.insert.position === 'append' ? 'inside' : 'after'} ${op.insert.ref}:`);
     lines.push(`    ${op.insert.html}`);
+    if (op.insert.kind)
+      lines.push(`    the user placed a ${op.insert.kind}: build a real ${op.insert.kind} in the project's style. Don't swap it for another kind of control; suggest alternatives in the note.`);
     if (op.insert.float) lines.push(`    placed freely: it floats over the layout in the editor (absolute position is only the editor's). Put it into the real layout where it sits, aligned with its neighbours.`);
   }
   for (const n of op.neighbours ?? []) lines.push(`    now ${n.relation} ${n.text}  (${n.selector})`);
@@ -58,8 +60,22 @@ export function describeRound(s: Session, r: Round): string {
   if (r.results.length) {
     out.push('RESULTS');
     for (const x of r.results) out.push(`  [${x.item}] ${x.state}: ${x.note}`);
-  }
+  } else if (r.status === 'submitted') out.push(...howToApply(r));
   return out.join('\n').trimEnd();
+}
+
+/** The per-item order, spelled out with this round's numbers, so each change is recorded on its own. */
+function howToApply(r: Round): string[] {
+  const ids = [...r.ops.map((o) => o.id), ...r.comments.map((c) => c.id), ...(r.undo ?? []).map((u) => u.id)];
+  return [
+    'HOW TO APPLY (each item is recorded on its own so the user can undo it):',
+    `  for each item: edit, then right away: result --round ${r.n} --item <id> --state applied|question --note "<what changed, for the user>"`,
+    '  one item at a time; items built together share one result: --item <id1>,<id2>',
+    '  a question note is the full question for the user, never one word',
+    '  notes with quotes or apostrophes: --note-file <file> instead of --note',
+    `  then: finish --round ${r.n}`,
+    `  items: ${ids.join(', ')}`,
+  ];
 }
 
 export function describeStatus(s: Session): string {

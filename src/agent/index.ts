@@ -882,6 +882,7 @@ function boot() {
     xs: number[];
     ys: number[];
     moved: boolean;
+    min: number; // distance before a press becomes a drag
   };
   let drag: Drag | null = null;
   const SNAP = 6;
@@ -939,7 +940,7 @@ function boot() {
     if (!drag) return;
     const dx0 = e.clientX - drag.sx;
     const dy0 = e.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx0, dy0) < 3) return;
+    if (!drag.moved && Math.hypot(dx0, dy0) < drag.min) return;
     drag.moved = true;
     let dx = dx0;
     let dy = dy0;
@@ -965,6 +966,12 @@ function boot() {
     drawGuides(null, null);
     if (!d.moved) return;
     const after = (d.el as HTMLElement).style.translate;
+    const a = parseTranslate(after);
+    if (Math.round(a.x) === Math.round(d.base.x) && Math.round(a.y) === Math.round(d.base.y)) {
+      // Snapped back to where it started: nothing moved, so don't record an edit.
+      (d.el as HTMLElement).style.translate = d.baseRaw;
+      return;
+    }
     moveOp(d.el, `${d.base.x}px ${d.base.y}px`, after, d.baseRaw, false);
   }
 
@@ -1021,16 +1028,21 @@ function boot() {
             if (t === document.body || t === document.documentElement) return;
             const { xs, ys } = snapLines(t);
             const baseRaw = inlineOf(t, 'translate');
+            const r0 = t.getBoundingClientRect();
+            // Page-sized containers (main, a page wrapper) are easy to drag by accident while selecting
+            // something inside them, so they need a deliberate pull before they move.
+            const big = r0.width >= innerWidth * 0.6 && r0.height >= innerHeight * 0.5;
             drag = {
               el: t,
               sx: pe.clientX,
               sy: pe.clientY,
               base: parseTranslate((t as HTMLElement).style.translate || ''),
               baseRaw,
-              r0: t.getBoundingClientRect(),
+              r0,
               xs,
               ys,
               moved: false,
+              min: (big ? 24 : 3) / zoom,
             };
           } else if (mode === 'add') {
             addComponent(t, addKind, { x: pe.clientX, y: pe.clientY });

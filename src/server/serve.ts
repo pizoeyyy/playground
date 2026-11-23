@@ -4,7 +4,7 @@ import path from 'node:path';
 import { filesSignature, proxyFrame, staticFrame } from './frame.ts';
 import { LAST_FILE, serverFile, Store, writeFileAtomic } from './store.ts';
 import { newId, openRound } from '../shared/session.ts';
-import { readPatch, undoPatch } from './patches.ts';
+import { ensureBase, readPatch, undoPatch } from './patches.ts';
 import type { Action } from '../shared/types.ts';
 
 export type ServeOptions = {
@@ -136,6 +136,8 @@ export async function serve(o: ServeOptions) {
         const after = store.dispatch({ type: 'send', at: Date.now() });
         const round = openRound(after);
         if (after === before || !round) return json(res, 409, { error: 'nothing to send, or a round is already in progress', session: after });
+        // Record the project before Claude touches it, so each item's change can be undone exactly.
+        ensureBase(dir, round.n, after.root);
         // Freeze "before" images of every slide this round touches.
         const shots: Record<string, string> = {};
         const slides = new Set([...round.ops.map((x) => x.slide), ...round.comments.map((x) => x.slide)]);

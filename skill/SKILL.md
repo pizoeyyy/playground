@@ -25,9 +25,10 @@ The tool ships inside this skill folder as `dist/cli.js` (a Node script, no depe
 1. **Never edit source until a round is submitted** (Save and send, or `apply`). Exploring, commenting and dragging only touch the session data (kept in `~/.playground/sessions/`, outside the project).
 2. **Interpret intent, not pixels.** Recorded moves and resizes are rough hints. Never write `position: absolute`, `translate`, magic margins or one-off pixel widths to reproduce a drag (see Auto-align).
 3. **Never guess.** If an item is ambiguous or can't be mapped to the source, record it as a `question`.
-4. **Snapshot before editing, then one item at a time.** `pg snapshot` every file you might touch (new files too), then finish each item and record its `pg result` before starting the next. That is how each change gets recorded on its own, so the user can undo it exactly later.
-5. **Write results through the CLI**, never by editing `session.json` by hand: the CLI goes through the running server so the editor updates live.
-6. **Report honestly.** `applied` is Claude's claim; the developer's Confirm is the proof.
+4. **One item at a time.** Finish each item and record its `pg result` before starting the next. That is how each change gets recorded on its own, so the user can undo it exactly later.
+5. **What the user placed is what they asked for.** An inserted dropdown stays a dropdown, a button stays a button. Build that kind of control in the project's style. If you think a different control would be better, still build theirs and suggest the alternative in the note (or ask with `--state question` before building anything else). Never swap it silently.
+6. **Write results through the CLI**, never by editing `session.json` by hand: the CLI goes through the running server so the editor updates live.
+7. **Report honestly.** `applied` is Claude's claim; the developer's Confirm is the proof.
 
 ## Running commands
 
@@ -52,8 +53,9 @@ If `SKILL_DIR/dist/cli.js` is missing, the skill was copied without its tool: te
 | `pg serve <file \| http://localhost:N> [--root PROJECT]` | Start the editor. `--root` is the project folder for URL targets (default: current folder) |
 | `pg wait --session DIR` | Blocks until a round is sent, prints it, exits 0. Exits 3 with `STOPPED` if the server is gone |
 | `pg show --session DIR [--round N] [--json]` | Print a round |
-| `pg snapshot --session DIR --round N <files...>` | Before editing: copy the files and start tracking them (files you will create count too) |
-| `pg result --session DIR --round N --item ID[,ID] --state applied\|question --note "..."` | Record one item's outcome, plus whatever changed in the tracked files since the last result |
+| `pg snapshot --session DIR --round N <files...>` | Copy files to the revision folder and track them. Optional in a git project (every changed file is tracked automatically); needed for files git ignores, and in folders without git |
+| `pg result --session DIR --round N --item ID[,ID] --state applied\|question --note "..."` | Record one item's outcome, plus whatever changed since the last result |
+| `pg result ... --note-file FILE` | Same, with the note read from a file. Use this on the WSL runner whenever the note has quotes, apostrophes or `$` |
 | `pg finish --session DIR --round N` | Mark the round applied; the editor reloads and shows the review |
 | `pg status --session DIR` | Per-slide summary |
 | `pg stop --session DIR` | Stop the server |
@@ -88,13 +90,13 @@ If the editor shows **"This page keeps reloading itself"**, something outside th
 
 ### 3. A round arrives
 
-The `wait` task's output is the round: slides, how each slide was reached, and every item with its id, selector, element and details. Work through each item:
+The `wait` task's output is the round: slides, how each slide was reached, and every item with its id, selector, element and details. It ends with the exact commands for this round. Work through each item:
 
 - **CHANGE REQUEST**: implement what it asks, following the project's conventions (file layout, naming, tokens).
 - **STYLE**: change the style where it is defined (class, token, CSS variable; inline only if the file already works that way). If the new colour is close to an existing token, use the token and say so in the note.
 - **TEXT**: change the copy in the source.
 - **BEHAVIOR**: the user describes what an element should *do* ("on click, open the confirm popup; Cancel closes it"). It can sit on an existing element or on one they just added. Build the real interaction: state, handlers, navigation, show/hide, validation, whatever the description needs, in the project's stack and conventions. The inserted element is only a placeholder look; the behavior comment is the spec. If the description leaves something open (what the dropdown options are, where Confirm goes), use a sensible default and say which in the note, or ask with `--state question` if it changes the design.
-- **INSERT / DUPLICATE**: add the real thing in that position. The line after INSERT names the kind: button, card, dropdown, menu, popup, input, toggle, tabs, banner, badge, heading, text, list or image. The markup shown is a neutral placeholder (inline styles, `data-pg-kind`). Rebuild it with the project's own components, classes and tokens, matching its nearest sibling, and drop `data-pg-id`, `data-pg-kind` and the placeholder inline styles. Kind hints:
+- **INSERT / DUPLICATE**: add the real thing in that position. The line after INSERT names the kind: button, card, dropdown, menu, popup, input, toggle, tabs, banner, badge, heading, text, list or image. The kind is a requirement (Hard Rule 5): a placed dropdown becomes a real dropdown, never radio buttons, a toggle or a different layout. The markup shown is a neutral placeholder (inline styles, `data-pg-kind`). Rebuild it with the project's own components, classes and tokens, matching its nearest sibling, and drop `data-pg-id`, `data-pg-kind` and the placeholder inline styles. Kind hints:
   - **popup**: a real modal/dialog (not inline). Hidden until something opens it, unless a BEHAVIOR says otherwise; wire its Cancel and Confirm.
   - **menu**: a trigger that opens a list; **dropdown**: a select with the project's field style. Options are placeholders unless a BEHAVIOR names them.
   - **tabs**: working tabs that switch real panels, or ask what each tab shows.
@@ -106,12 +108,14 @@ The `wait` task's output is the round: slides, how each slide was reached, and e
 An inserted element and a BEHAVIOR on it are one piece of work: build the element and its interaction together, then write a `pg result` for **each** of the two item ids.
 
 Order:
-1. `pg snapshot` every file you might touch in this round, including files you'll create. You can run it again later to track more.
+1. In a git project the playground recorded every file when the user pressed Save and send, so nothing is needed before editing. Outside git, or for files git ignores, `pg snapshot` them first (files you'll create count too).
 2. For each item, in turn: make that item's edits, then immediately `pg result` for it. Don't start the next item first. The CLI saves exactly what changed since the previous result as this item's change, which lets the user undo it on its own.
 3. Items you build together (an inserted popup and the BEHAVIOR on it) get one result: `--item id1,id2`.
 4. `pg finish`.
 
- Notes are one plain sentence naming the file and what changed. Use `--state question` with the question as the note when you can't proceed. Questions come back to the user as open change requests.
+The note is what the user reads in the editor, so write it for them: one or two plain sentences naming the file, what changed, and any choice you made for them ("used the project's Select; options are 1 set and 3 sets"). For `--state question`, the note **is the question**: ask exactly what you need to know, with the options you see ("Should Edit sets go back to choosing A, B and C, or open the print settings?"). Never a single word like "Unclear". Questions come back to the user as open items with your question on them.
+
+On the WSL runner the note travels inside `bash -lc '…'`, so an apostrophe ends the string early. Write the note to a file with your file tool and pass `--note-file C:/path/to/note.txt` instead, or leave apostrophes out.
 
 ### Frozen slides
 
@@ -131,6 +135,7 @@ The user drops things roughly and the editor snaps to a grid, but the code must 
 - **Overlaps** in the editor are never intentional. If something ends up on top of another element, give it its own space in the layout.
 - **Heavily misaligned surroundings**: in every container you touch, also fix what is clearly off. Edges a few pixels apart that should line up, uneven gaps between siblings, ragged baselines, mismatched heights in a row. Use the project's spacing scale. Mention it in the note ("also evened the gaps in the actions row to 12px"). Don't restyle containers you didn't touch.
 
+- **Moves of a whole page or large container** (`main`, a page wrapper, a section spanning the page) by a few pixels are almost always accidental drags. Don't change the layout for them: record `applied` with a note that you left it as is, unless the label shows a clear intent.
 - Read a move's **intent** from its neighbours ("now below Pay", "now right of Back") and its direction. It may be a reorder within a row or column, a spacing change, or a move into another container.
 - Use the existing layout system: flex/grid order and gap, the project's spacing tokens, existing alignment utilities.
 - An element dropped "roughly right of Pay" becomes a sibling in Pay's row with the same height, radius and gap, aligned to its neighbours' edges and baselines. Equalise gaps within a group.

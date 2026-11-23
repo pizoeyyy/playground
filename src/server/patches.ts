@@ -1,10 +1,14 @@
 // Per-item file changes, so one change Claude made can be undone exactly.
 //
-// `snapshot` writes a checkpoint of the files Claude is about to edit. Each `result` compares those
-// files against the checkpoint, saves what changed as that item's patch, and moves the checkpoint
-// on. Undo restores an item's files, or reverse-applies its diff when later items edited the same
+// When a round starts, the whole project folder is recorded as a git tree (the "base"), without
+// touching the user's index or files. `snapshot` adds files to a checkpoint too. Each `result`
+// compares the tracked files, plus every file git sees changed since the base, against the
+// checkpoint, saves what changed as that item's patch, and moves the checkpoint on. Because the
+// base is taken before Claude edits anything, a late `snapshot` no longer loses the "before". Undo restores an item's files, or reverse-applies its diff when later items edited the same
 // file elsewhere. Overlapping edits are a conflict, and the undo goes to Claude instead.
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { diffArrays } from 'diff';
 import { writeFileAtomic } from './store.ts';
@@ -32,10 +36,91 @@ function readCheckpoint(dataDir: string, round: number): Checkpoint {
   }
 }
 
-/** Start (or extend) tracking these files for the round, recording their current contents. */
+// ---------- round base (git) ----------
+
+type Base = { top: string; tree: string };
+const baseFile = (dataDir: string, round: number) => path.join(dataDir, `base-r${round}.json`);
+
+function git(cwd: string, args: string[], env?: Record<string, string>): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 512 * 1024 * 1024,
+  });
+}
+
+/** The project folder as it is now (tracked and untracked, minus ignored) as a git tree. Leaves the user's index alone. */
+function workTree(root: string): Base | null {
+  let tmp = '';
+  try {
+    const top = path.resolve(git(root, ['rev-parse', '--show-toplevel']).trim());
+    const index = path.resolve(top, git(top, ['rev-parse', '--git-path', 'index']).trim());
+    tmp = path.join(os.tmpdir(), `playground-index-${process.pid}-${Date.now()}`);
+    if (fs.existsSync(index)) fs.copyFileSync(index, tmp); // reuse its stat cache: much faster
+    git(top, ['add', '-A', '.'], { GIT_INDEX_FILE: tmp });
+    return { top, tree: git(top, ['write-tree'], { GIT_INDEX_FILE: tmp }).trim() };
+  } catch {
+    return null; // not a git project, or git missing: `snapshot` still works
+  } finally {
+    if (tmp) fs.rmSync(tmp, { force: true });
+  }
+}
+
+function readBase(dataDir: string, round: number): Base | null {
+  try {
+    return JSON.parse(fs.readFileSync(baseFile(dataDir, round), 'utf8')) as Base;
+  } catch {
+    return null;
+  }
+}
+
+/** Record the project as it is at the start of a round, once. Returns false when there's no git to use. */
+export function ensureBase(dataDir: string, round: number, root: string | undefined): boolean {
+  if (readBase(dataDir, round)) return true;
+  if (!root) return false;
+  const base = workTree(root);
+  if (!base) return false;
+  writeFileAtomic(baseFile(dataDir, round), JSON.stringify(base));
+  return true;
+}
+
+/** Every file changed since the round's base, with its contents at the base (null = didn't exist). */
+function changedSinceBase(dataDir: string, round: number): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  const base = readBase(dataDir, round);
+  if (!base) return out;
+  const now = workTree(base.top);
+  if (!now || now.tree === base.tree) return out;
+  let names: string[];
+  try {
+    names = git(base.top, ['diff-tree', '-r', '--name-only', '-z', base.tree, now.tree]).split('\0').filter(Boolean);
+  } catch {
+    return out;
+  }
+  for (const rel of names) {
+    if (rel.split('/').includes('.playground')) continue; // legacy session folder inside the project
+    let before: string | null = null;
+    try {
+      before = git(base.top, ['cat-file', 'blob', `${base.tree}:${rel}`]);
+    } catch {
+      /* created during the round */
+    }
+    out.set(path.resolve(base.top, rel), before);
+  }
+  return out;
+}
+
+/** Start (or extend) tracking these files for the round, recording their contents before the round's edits. */
 export function writeCheckpoint(dataDir: string, round: number, files: string[]) {
   const cp = readCheckpoint(dataDir, round);
-  for (const f of files) if (!(f in cp)) cp[f] = readOrNull(f);
+  const changed = files.some((f) => !(path.resolve(f) in cp)) ? changedSinceBase(dataDir, round) : new Map();
+  for (const f of files.map((x) => path.resolve(x))) {
+    if (f in cp) continue;
+    // Already edited before the snapshot: those edits are still unrecorded, so start from the base.
+    cp[f] = changed.has(f) ? changed.get(f)! : readOrNull(f);
+  }
   writeFileAtomic(checkpointFile(dataDir, round), JSON.stringify(cp));
 }
 
@@ -45,6 +130,8 @@ export function writeCheckpoint(dataDir: string, round: number, files: string[])
  */
 export function recordItemPatch(dataDir: string, round: number, items: string[]): ItemPatch | null {
   const cp = readCheckpoint(dataDir, round);
+  // Files edited since the round started that were never snapshotted are tracked from the base.
+  for (const [f, before] of changedSinceBase(dataDir, round)) if (!(f in cp)) cp[f] = before;
   const files: FileChange[] = [];
   for (const [f, before] of Object.entries(cp)) {
     const after = readOrNull(f);

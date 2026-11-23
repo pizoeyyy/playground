@@ -14,7 +14,8 @@ import {
   writeSession,
 } from './store.ts';
 import { describeRound, describeStatus } from '../shared/describe.ts';
-import { recordItemPatch, writeCheckpoint } from './patches.ts';
+import { parse } from './args.ts';
+import { ensureBase, recordItemPatch, writeCheckpoint } from './patches.ts';
 import { latestRound, openRound, reduce } from '../shared/session.ts';
 import type { Action, ResultState, Session } from '../shared/types.ts';
 
@@ -25,7 +26,7 @@ const HELP = `playground — review editor for HTML prototypes and live apps
   playground show     [--session DIR] [--round N] [--json]
   playground status   [--session DIR]
   playground snapshot [--session DIR] --round N <files...>
-  playground result   [--session DIR] --round N --item ID[,ID] --state applied|question --note "..."
+  playground result   [--session DIR] --round N --item ID[,ID] --state applied|question --note "..." | --note-file FILE
   playground finish   [--session DIR] --round N
   playground stop     [--session DIR]
 
@@ -33,23 +34,6 @@ serve prints "PLAYGROUND editor=URL frame=URL session=DIR". Pass that DIR as --s
 other commands; without it they use the most recently started session.
 --root is the project folder for URL targets (default: the current folder).`;
 
-function parse(argv: string[]) {
-  const pos: string[] = [];
-  const flags: Record<string, string | true> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith('--')) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next === undefined || next.startsWith('--')) flags[key] = true;
-      else {
-        flags[key] = next;
-        i++;
-      }
-    } else pos.push(a);
-  }
-  return { pos, flags };
-}
 
 /**
  * Accept Windows paths (C:\x or C:/x) when running inside WSL, so Claude Code on Windows can pass
@@ -118,6 +102,11 @@ function roundArg(s: Session, flags: Record<string, string | true>) {
   return r ?? die(n ? `No round ${n}.` : 'No rounds yet.');
 }
 
+/** Record the project at the start of a round (git), so every item's change can be undone exactly. */
+function roundBase(dir: string, n: number) {
+  ensureBase(dir, n, readSession(dir)?.root);
+}
+
 /** --session, else the last session started on this machine. */
 function dataDirArg(flags: Record<string, string | true>): string {
   if (typeof flags.session === 'string') return resolveDataDir(localPath(flags.session));
@@ -169,6 +158,7 @@ async function main() {
         const s = readSession(dir);
         const r = s && openRound(s);
         if (s && r) {
+          roundBase(dir, r.n);
           console.log(`session: ${dir}`);
           console.log(describeRound(s, r));
           return;
@@ -182,6 +172,7 @@ async function main() {
       const dir = dataDirArg(flags);
       const s = readSession(dir) ?? die(`No session at ${sessionFile(dir)}`);
       const r = roundArg(s, flags);
+      if (r.status === 'submitted') roundBase(dir, r.n);
       console.log(flags.json ? JSON.stringify(r, null, 2) : describeRound(s, r));
       return;
     }
@@ -200,6 +191,7 @@ async function main() {
       const root = s?.root ?? process.cwd();
       const n = Number(flags.round ?? die('--round is required'));
       const dest = path.join(dir, 'revisions', `r${n}`);
+      roundBase(dir, n);
       // Files that don't exist yet can be tracked too (Claude may create them).
       writeCheckpoint(dir, n, pos.map(localPath));
       for (const f of pos) {
@@ -221,8 +213,15 @@ async function main() {
       const state = flags.state as ResultState;
       if (state !== 'applied' && state !== 'question') die('--state must be applied or question');
       const items = (typeof flags.item === 'string' ? flags.item : die('--item is required')).split(',').map((x) => x.trim()).filter(Boolean);
-      const note = typeof flags.note === 'string' ? flags.note : die('--note is required');
+      const note =
+        typeof flags['note-file'] === 'string'
+          ? fs.readFileSync(localPath(flags['note-file']), 'utf8').trim()
+          : typeof flags.note === 'string'
+            ? flags.note
+            : die('--note "..." or --note-file FILE is required');
+      if (!note) die('The note is empty.');
       const n = Number(flags.round ?? die('--round is required'));
+      roundBase(dir, n);
       // Whatever changed in the snapshotted files since the last result belongs to these items.
       const patch = recordItemPatch(dir, n, items);
       const linked = items.length > 1 ? items : undefined;

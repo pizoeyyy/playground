@@ -207,7 +207,7 @@ function apply(s: Session, a: Action): Session | null {
             selector: op.selector,
             element: op.element,
             type: 'change-request',
-            body: `${op.label}`,
+            body: `About your edit "${op.label}": Claude has a question before making it.`,
             status: 'open',
             replies: [{ author: 'claude', body: res.note, at: Date.now() }],
             at: Date.now(),

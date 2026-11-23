@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { canUndoItem } from '../shared/session.ts';
-import { closeItemMenu, focusComment, setState, undoChange, useStore } from './store.ts';
+import { closeItemMenu, deleteComment, focusComment, setState, undoChange, useStore } from './store.ts';
 
 /** Right-click menu for comments and revision items: the place to undo a change Claude made. */
 export function ItemMenu() {
@@ -83,6 +83,11 @@ export function ItemMenu() {
             })}
           >
             <span>Reply</span>
+          </button>
+          <div className="ctx-sep" />
+          <button role="menuitem" className="ctx-item" data-danger onClick={run(() => deleteComment(menu.item))}>
+            <span>Delete comment</span>
+            <kbd>Del</kbd>
           </button>
         </>
       )}

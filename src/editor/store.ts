@@ -549,6 +549,18 @@ export async function addComment(kind: CommentType, body: string) {
   queueMicrotask(syncPins);
 }
 
+/** Delete a comment. Asks first if Claude has already seen it, since its reply goes too. */
+export function deleteComment(id: string) {
+  const c = state.session?.comments.find((x) => x.id === id);
+  if (!c) return;
+  const seen = c.status !== 'open' || c.replies.some((r) => r.author === 'claude');
+  if (seen && !confirm('Delete this comment? Claude has already seen it, and its replies will be deleted too. Changes Claude made stay.')) return;
+  act({ type: 'deleteComment', id });
+  if (state.openThread === id) setState({ openThread: null });
+  queueMicrotask(syncPins);
+  toast('Comment deleted');
+}
+
 export function focusComment(id: string) {
   const c = state.session?.comments.find((x) => x.id === id);
   if (!c) return;

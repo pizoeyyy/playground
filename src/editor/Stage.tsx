@@ -5,6 +5,7 @@ import {
   act,
   addComment,
   closeMenu,
+  deleteComment,
   openItemMenu,
   undoChange,
   toAgent,
@@ -346,7 +347,7 @@ export function Thread({ comment: c, n }: { comment: Comment; n: number }) {
         }}
       />
       <div className="row">
-        <button className="ghost danger" onClick={() => { act({ type: 'deleteComment', id: c.id }); setState({ openThread: null }); }}>
+        <button className="ghost danger" onClick={() => deleteComment(c.id)}>
           Delete
         </button>
         <span className="grow" />

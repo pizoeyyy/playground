@@ -33,6 +33,9 @@ export const IconReplay = () => (
 export const IconClose = () => (
   <svg {...S} width={12} height={12}><path d="M4 4l8 8M12 4l-8 8" /></svg>
 );
+export const IconTrash = () => (
+  <svg {...S} width={14} height={14}><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4" /></svg>
+);
 export const IconCheck = () => (
   <svg {...S} width={14} height={14}><path d="M3.5 8.5l3 3 6-7" /></svg>
 );

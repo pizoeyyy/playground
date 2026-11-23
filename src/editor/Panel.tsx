@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { latestRound, roundItems } from '../shared/session.ts';
 import { COMMENT_LABEL, type Comment, type Op, type Round, type UndoItem } from '../shared/types.ts';
-import { IconCheck } from './icons.tsx';
-import { act, focusComment, getState, openComposer, openItemMenu, setState, toAgent, useStore } from './store.ts';
+import { IconCheck, IconTrash } from './icons.tsx';
+import { act, deleteComment, focusComment, getState, openComposer, openItemMenu, setState, toAgent, useStore } from './store.ts';
 
 export function Panel() {
   const tab = useStore((s) => s.tab);
@@ -237,16 +237,37 @@ function Comments() {
 
 function CommentCard({ c, n }: { c: Comment; n: number }) {
   return (
-    <button
+    <div
       className="card"
+      role="button"
+      tabIndex={0}
       data-status={c.status}
       onClick={() => focusComment(c.id)}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          focusComment(c.id);
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') deleteComment(c.id);
+      }}
       onContextMenu={(e) => openItemMenu(e, c.id, true, `${COMMENT_LABEL[c.type]} ${n}: ${c.body}`)}
     >
       <div className="card-head">
         <span className="pin-dot" data-type={c.type}>{n}</span>
         <span className="kind">{COMMENT_LABEL[c.type]}</span>
         <span className="status" data-status={c.status}>{c.status}</span>
+        <button
+          className="card-del"
+          aria-label={`Delete comment ${n}`}
+          title="Delete comment"
+          onClick={(e) => {
+            e.stopPropagation();
+            deleteComment(c.id);
+          }}
+        >
+          <IconTrash />
+        </button>
       </div>
       <div className="on">{c.element}</div>
       <p className="body">{c.body}</p>
@@ -255,7 +276,7 @@ function CommentCard({ c, n }: { c: Comment; n: number }) {
           <b>{r.author === 'claude' ? 'Claude' : 'You'}</b> {r.body}
         </p>
       ))}
-    </button>
+    </div>
   );
 }
 

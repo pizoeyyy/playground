@@ -10,6 +10,15 @@ export type Slide = {
   parent: string | null;
   path: Step[]; // clicks on the parent slide that led here
   thumb?: string; // served URL of the latest thumbnail
+  frozen?: FrozenInfo; // a static copy of another slide, saved when a comment was made on it
+};
+
+export type FrozenInfo = {
+  from: string; // the live slide it was copied from
+  url: string; // the live page's URL at the time
+  version: number; // the live page's change counter at the time (comments on an unchanged page share a copy)
+  loadId: string; // which page load that counter belongs to
+  at: number;
 };
 
 export type Neighbour = { selector: string; text: string; relation: string };
@@ -55,7 +64,8 @@ export type CommentStatus = 'open' | 'sent' | 'applied' | 'resolved' | 'undone';
 
 export type Comment = {
   id: string;
-  slide: string;
+  slide: string; // where it is pinned (a frozen copy when made on a live page)
+  live?: string; // the live slide it was made on, where its pin also shows while the element is there
   selector: string;
   element: string;
   type: CommentType;

@@ -37,12 +37,21 @@ function boot() {
     history[k] = function (...args: Parameters<History['pushState']>) {
       const before = here();
       const r = orig(...args);
-      if (here() !== before) post({ type: 'nav', url: here(), kind: k === 'pushState' ? 'push' : 'replace' });
+      if (here() !== before) {
+        version++;
+        post({ type: 'nav', url: here(), kind: k === 'pushState' ? 'push' : 'replace' });
+      }
       return r;
     } as History['pushState'];
   }
   addEventListener('popstate', () => post({ type: 'nav', url: here(), kind: 'pop' }));
   addEventListener('hashchange', () => post({ type: 'nav', url: here(), kind: 'hash' }));
+  // A frozen copy is a static snapshot: no scripts, clicks don't navigate.
+  const FROZEN = document.documentElement.hasAttribute('data-pg-frozen');
+  // Bumped whenever the user changes the page, so comments on an unchanged page share one frozen copy.
+  const LOAD_ID = Math.random().toString(36).slice(2, 10);
+  let version = 0;
+  const bump = () => version++;
   post({ type: 'ready', url: here(), title: document.title });
 
   // ---------- helpers ----------
@@ -264,6 +273,7 @@ function boot() {
   }
 
   function emit(op: AgentOp) {
+    bump();
     post({ type: 'op', op });
     applied.set(op.id, op as Op);
     lastEmit = { op, at: Date.now() };
@@ -295,6 +305,7 @@ function boot() {
   }
 
   function revertOp(op: Op) {
+    bump();
     applied.delete(op.id);
     const el = q(op.selector);
     if (!el) return;
@@ -746,6 +757,11 @@ function boot() {
 
   // ---------- click-through ----------
   function clickThrough(el: Element) {
+    if (FROZEN) {
+      post({ type: 'notice', text: 'This is a frozen copy. Use the live slide to click through.' });
+      return;
+    }
+    bump();
     hideMenu();
     post({ type: 'clicked', step: { selector: selectorOf(el), text: describe(el) } });
     const r = el.getBoundingClientRect();
@@ -913,6 +929,14 @@ function boot() {
         if (passthrough || isOurs(e)) return;
         if (editing && e.target instanceof Node && editing.contains(e.target)) return;
         if (mode === 'interact') {
+          if (FROZEN && type !== 'input' && type !== 'change') {
+            // Nothing on a frozen copy should run or navigate.
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (type === 'click') post({ type: 'notice', text: 'This is a frozen copy. Use the live slide to interact.' });
+            return;
+          }
+          bump();
           if (type === 'click') {
             const t = pick(e.target);
             if (t) post({ type: 'clicked', step: { selector: selectorOf(t), text: describe(t) } });
@@ -1033,6 +1057,72 @@ function boot() {
     return true;
   }
 
+  // ---------- frozen copies ----------
+  /**
+   * A static copy of the page as it looks right now: live form values baked in, scripts replaced by
+   * inert placeholders (so nth-child selectors still match), a <base> so styles and images load.
+   */
+  function snapshotHtml(): string {
+    const live = document.documentElement;
+    const clone = live.cloneNode(true) as HTMLElement;
+    const liveFields = live.querySelectorAll('input, textarea, select');
+    const copyFields = clone.querySelectorAll('input, textarea, select');
+    liveFields.forEach((el, i) => {
+      const c = copyFields[i];
+      if (!c) return;
+      if (el instanceof HTMLInputElement) {
+        if (el.type === 'checkbox' || el.type === 'radio') c.toggleAttribute('checked', el.checked);
+        else if (el.type !== 'file' && el.type !== 'password') c.setAttribute('value', el.value);
+      } else if (el instanceof HTMLTextAreaElement) c.textContent = el.value;
+      else if (el instanceof HTMLSelectElement)
+        [...el.options].forEach((o, j) => (c as HTMLSelectElement).options[j]?.toggleAttribute('selected', o.selected));
+    });
+    const liveCanvas = live.querySelectorAll('canvas');
+    clone.querySelectorAll('canvas').forEach((c, i) => {
+      try {
+        const img = document.createElement('img');
+        img.src = liveCanvas[i].toDataURL();
+        img.setAttribute('style', c.getAttribute('style') ?? '');
+        img.width = liveCanvas[i].width;
+        img.height = liveCanvas[i].height;
+        c.replaceWith(img);
+      } catch {
+        /* tainted canvas: leave it blank */
+      }
+    });
+    clone.querySelectorAll('pg-overlay, #pg-cursor').forEach((n) => n.remove());
+    clone.querySelectorAll('script').forEach((n) => {
+      const t = document.createElement('template');
+      t.setAttribute('data-pg-removed', 'script');
+      n.replaceWith(t);
+    });
+    clone.querySelectorAll('link[rel="modulepreload"], link[rel="preload"][as="script"]').forEach((n) => n.remove());
+    for (const el of clone.querySelectorAll('*'))
+      for (const a of [...el.attributes]) if (/^on/i.test(a.name)) el.removeAttribute(a.name);
+    // Stylesheets that exist only in JS (adoptedStyleSheets) would otherwise be lost.
+    const head = clone.querySelector('head') ?? clone.insertBefore(document.createElement('head'), clone.firstChild);
+    for (const sheet of document.adoptedStyleSheets ?? []) {
+      try {
+        const st = document.createElement('style');
+        st.textContent = [...sheet.cssRules].map((r) => r.cssText).join('\n');
+        head.appendChild(st);
+      } catch {
+        /* cross-origin sheet */
+      }
+    }
+    const base = document.createElement('base');
+    base.href = location.href;
+    head.insertBefore(base, head.firstChild);
+    clone.setAttribute('data-pg-frozen', '');
+    clone.setAttribute('data-pg-scroll', `${Math.round(scrollX)},${Math.round(scrollY)}`);
+    return '<!doctype html>\n' + clone.outerHTML;
+  }
+
+  if (FROZEN) {
+    const [sx, sy] = (document.documentElement.getAttribute('data-pg-scroll') ?? '0,0').split(',').map(Number);
+    addEventListener('load', () => scrollTo(sx || 0, sy || 0));
+  }
+
   // ---------- thumbnails ----------
   let thumbTimer = 0;
   let thumbsOn = true;
@@ -1040,7 +1130,7 @@ function boot() {
     clearTimeout(thumbTimer);
     thumbTimer = window.setTimeout(capture, delay);
   }
-  async function capture(force = false) {
+  async function capture(force = false, slide?: string) {
     if (!thumbsOn && !force) return;
     try {
       const bg = getComputedStyle(document.body).backgroundColor;
@@ -1052,7 +1142,7 @@ function boot() {
         backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#ffffff',
         filter: (n) => n !== host && !(n instanceof Element && n.id === 'pg-cursor'),
       });
-      post({ type: 'thumb', dataUrl });
+      post({ type: 'thumb', dataUrl, slide });
     } catch {
       /* best effort */
     }
@@ -1192,10 +1282,13 @@ function boot() {
         whenReady(() => replay(m.path));
         break;
       case 'capture':
-        capture(true);
+        capture(true, m.slide);
         break;
       case 'menuClosed':
         menuShown = false;
+        break;
+      case 'freeze':
+        post({ type: 'frozen', req: m.req, html: snapshotHtml(), version, loadId: LOAD_ID, url: here(), title: document.title, frozen: FROZEN });
         break;
       case 'place': {
         // The editor catches placement clicks itself, so a busy page can't mis-order them.

@@ -37,6 +37,12 @@ export function describeRound(s: Session, r: Round): string {
     out.push(`SLIDE ${slideName(s, id)}`);
     const sl = s.slides.find((x) => x.id === id);
     if (sl?.path.length) out.push(`  reached by clicking: ${sl.path.map((p) => p.text).join(' > ')}`);
+    if (sl?.frozen) {
+      const from = s.slides.find((x) => x.id === sl.frozen!.from);
+      out.push(`  FROZEN copy of ${from ? slideName(s, from.id) : sl.frozen.from}: the page exactly as it looked when the comment was made (live URL ${sl.frozen.url})`);
+      out.push(`  saved page: frozen/${sl.id}.html in the session folder. The code to change is the live page's source.`);
+      if (from?.path.length) out.push(`  the live page was reached by clicking: ${from.path.map((p) => p.text).join(' > ')}`);
+    }
     for (const op of r.ops.filter((o) => o.slide === id)) out.push(indent(describeOp(op)));
     for (const c of r.comments.filter((c) => c.slide === id)) out.push(indent(describeComment(c)));
     out.push('');

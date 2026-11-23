@@ -125,6 +125,12 @@ export async function serve(o: ServeOptions) {
         store.dispatch({ type: 'updateSlide', id: slide, patch: { thumb: `/files/thumbs/${slide}.jpg?v=${Date.now()}` } });
         return json(res, 200, { ok: true });
       }
+      if (req.method === 'POST' && p === '/api/freeze') {
+        const { slide, html } = JSON.parse(await readBody(req)) as { slide: string; html: string };
+        if (!SAFE_ID.test(slide ?? '') || typeof html !== 'string') return json(res, 400, { error: 'bad frozen copy' });
+        writeFileAtomic(path.join(frozenDir, `${slide}.html`), html);
+        return json(res, 200, { url: `/__playground/frozen/${slide}.html` });
+      }
       if (req.method === 'POST' && p === '/api/send') {
         const before = store.session;
         const after = store.dispatch({ type: 'send', at: Date.now() });
@@ -172,11 +178,13 @@ export async function serve(o: ServeOptions) {
   });
 
   const agentFile = path.join(o.distDir, 'agent.js');
+  const frozenDir = path.join(dir, 'frozen');
+  fs.mkdirSync(frozenDir, { recursive: true });
   const served = new Set<string>([o.target]);
   const makeFrame = () =>
     isUrl
-      ? proxyFrame(o.target, { agentFile, editorOrigin: ports().editor, frameOrigin: () => ports().frame })
-      : staticFrame(o.target, { agentFile, editorOrigin: ports().editor, served });
+      ? proxyFrame(o.target, { agentFile, editorOrigin: ports().editor, frameOrigin: () => ports().frame, frozenDir })
+      : staticFrame(o.target, { agentFile, editorOrigin: ports().editor, served, frozenDir });
   let frame = makeFrame();
 
   // Find a free pair of ports: editor on N, page on N+1.

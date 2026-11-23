@@ -113,6 +113,10 @@ Order:
 
  Notes are one plain sentence naming the file and what changed. Use `--state question` with the question as the note when you can't proceed. Questions come back to the user as open change requests.
 
+### Frozen slides
+
+When the user comments on a live page, the editor saves a **frozen copy** of the page as it looked at that moment (an open menu, a filled form, a step in a flow) and pins the comment there, so it stays put however the page changes afterwards. In the round these slides say `FROZEN copy of …` with the live URL and the saved HTML (`frozen/<id>.html` in the session folder). Read that file to see the exact state the comment is about, such as which modal was open or what was typed, then change the **live page's source**. Never edit the frozen copy, and never try to reproduce that state in code unless the comment asks for it.
+
 ### Undo requests
 
 The user can right-click anything Claude applied and pick **Undo change on this comment** / **Undo this change**. The editor first undoes it exactly from the recorded change. You only get an **UNDO** item when that wasn't possible: the item had no recorded change, or a later change edited the same lines. The item says which earlier item it was, what you did then, why the exact undo failed, and where the recorded before/after file contents are (`patches/<id>.json` in the session folder).

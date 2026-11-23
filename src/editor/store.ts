@@ -194,7 +194,7 @@ export function resumeAfterLoop() {
 export const currentSlide = (): Slide | undefined => state.session?.slides.find((s) => s.id === state.current);
 const slideOps = (id: string): Op[] => (state.session ? activeOps(state.session).filter((o) => o.slide === id) : []);
 const slidePins = (id: string): string[] =>
-  state.session?.comments.filter((c) => c.slide === id && c.status !== 'resolved').map((c) => c.selector) ?? [];
+  state.session?.comments.filter((c) => (c.slide === id || c.live === id) && c.status !== 'resolved').map((c) => c.selector) ?? [];
 
 export function initAgent() {
   toAgent({
@@ -339,7 +339,7 @@ export function onAgentMessage(e: MessageEvent) {
       fetch('/api/thumb', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ slide: state.current, dataUrl: m.dataUrl }),
+        body: JSON.stringify({ slide: m.slide ?? state.current, dataUrl: m.dataUrl }),
       }).finally(() => {
         thumbWaiter?.();
         thumbWaiter = null;
@@ -347,6 +347,13 @@ export function onAgentMessage(e: MessageEvent) {
       break;
     case 'mode':
       setState({ mode: m.mode });
+      break;
+    case 'frozen':
+      freezeWaiters.get(m.req)?.(m);
+      freezeWaiters.delete(m.req);
+      break;
+    case 'notice':
+      toast(m.text);
       break;
     case 'menu':
       setState({ menu: m, composer: null, openThread: null });
@@ -454,14 +461,68 @@ export async function saveAndSend() {
   }
 }
 
-export function addComment(kind: CommentType, body: string) {
+// ---------- frozen copies ----------
+// A comment made on a live page pins to a frozen copy of the page as it looked at that moment, so
+// it stays put however the live page changes afterwards. Comments made without changing the page
+// in between share one copy.
+type FrozenMsg = Extract<FromAgent, { type: 'frozen' }>;
+let freezeReq = 0;
+const freezeWaiters = new Map<number, (m: FrozenMsg) => void>();
+
+function freezePage(): Promise<FrozenMsg | null> {
+  const req = ++freezeReq;
+  return new Promise((resolve) => {
+    freezeWaiters.set(req, resolve);
+    toAgent({ type: 'freeze', req });
+    setTimeout(() => {
+      if (freezeWaiters.delete(req)) resolve(null);
+    }, 4000);
+  });
+}
+
+/** The frozen slide this comment should live on (reused when the page hasn't changed), or null. */
+async function frozenSlideFor(liveId: string): Promise<string | null> {
+  const s = state.session;
+  const live = s?.slides.find((x) => x.id === liveId);
+  if (!s || !live || live.frozen) return null;
+  const snap = await freezePage();
+  if (!snap || snap.frozen) return null;
+  const same = state.session?.slides.find(
+    (x) => x.frozen?.from === liveId && x.frozen.loadId === snap.loadId && x.frozen.version === snap.version,
+  );
+  if (same) return same.id;
+  const id = newId('s').replace(/[^a-z0-9]/gi, '');
+  const r = await fetch('/api/freeze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slide: id, html: snap.html }) });
+  if (!r.ok) return null;
+  const { url } = (await r.json()) as { url: string };
+  const copies = state.session?.slides.filter((x) => x.frozen?.from === liveId).length ?? 0;
+  act({
+    type: 'addSlide',
+    slide: {
+      id,
+      url,
+      label: `${live.label} · frozen${copies ? ` ${copies + 1}` : ''}`,
+      parent: liveId,
+      path: [],
+      frozen: { from: liveId, url: snap.url, version: snap.version, loadId: snap.loadId, at: Date.now() },
+    },
+  });
+  toAgent({ type: 'capture', slide: id }); // the page looks exactly like the copy right now
+  toast('Saved a frozen copy of this page with your comment');
+  return id;
+}
+
+export async function addComment(kind: CommentType, body: string) {
   const c = state.composer;
   if (!c || !body.trim()) return;
+  setState({ composer: null });
+  const frozen = c.slide === state.current ? await frozenSlideFor(c.slide) : null;
   act({
     type: 'addComment',
     comment: {
       id: newId('c'),
-      slide: c.slide,
+      slide: frozen ?? c.slide,
+      live: frozen ? c.slide : undefined,
       selector: c.selector,
       element: c.element,
       type: kind,
@@ -471,14 +532,13 @@ export function addComment(kind: CommentType, body: string) {
       at: Date.now(),
     },
   });
-  setState({ composer: null });
   queueMicrotask(syncPins);
 }
 
 export function focusComment(id: string) {
   const c = state.session?.comments.find((x) => x.id === id);
   if (!c) return;
-  if (c.slide !== state.current) {
+  if (c.slide !== state.current && c.live !== state.current) {
     loadSlide(c.slide);
     setTimeout(() => toAgent({ type: 'select', selector: c.selector, scroll: true }), 600);
   } else toAgent({ type: 'select', selector: c.selector, scroll: true });

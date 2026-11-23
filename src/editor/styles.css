@@ -136,6 +136,13 @@ button { cursor: default; }
 .frame-inner iframe { display: block; border: 0; background: #fff; }
 .frame-overlay { position: absolute; inset: 0; pointer-events: none; }
 .place-layer { position: absolute; inset: 0; z-index: 1; cursor: crosshair; }
+.frozen-banner {
+  position: absolute; left: 50%; top: 10px; translate: -50% 0; z-index: 3; display: flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 32px); padding: 6px 8px 6px 12px; border-radius: 8px;
+  background: #eaf4ff; color: #12324d; box-shadow: 0 0 0 1px #c9e2fb, 0 4px 14px rgba(0,0,0,.08);
+}
+.frozen-banner .flake { color: #3a8ee6; }
+.slide[data-frozen] .thumb { border-style: dashed; }
 .zoom {
   position: absolute; right: 12px; bottom: 12px; padding: 3px 8px; border-radius: 4px;
   background: rgba(255,255,255,.9); color: var(--muted); font-size: 11px; box-shadow: 0 0 0 1px var(--line);

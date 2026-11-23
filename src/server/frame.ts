@@ -31,7 +31,21 @@ const TYPES: Record<string, string> = {
 
 const NO_STORE = { 'cache-control': 'no-store' };
 
-type Opts = { agentFile: string; editorOrigin: string; served?: Set<string> };
+type Opts = { agentFile: string; editorOrigin: string; served?: Set<string>; frozenDir: string };
+
+export const FROZEN_PREFIX = '/__playground/frozen/';
+
+/** Frozen copies live in the session folder and are served on the page's origin, so their <base> works. */
+function serveFrozen(res: http.ServerResponse, pathname: string, o: Opts) {
+  const m = /^\/__playground\/frozen\/([a-z0-9]+)\.html$/i.exec(pathname);
+  const file = m && path.join(o.frozenDir, `${m[1]}.html`);
+  if (!file || !fs.existsSync(file)) {
+    res.writeHead(404, NO_STORE).end('No such frozen copy');
+    return;
+  }
+  res.writeHead(200, { 'content-type': TYPES['.html'], ...NO_STORE });
+  res.end(injectAgent(fs.readFileSync(file, 'utf8'), o.editorOrigin));
+}
 
 function serveAgent(res: http.ServerResponse, agentFile: string) {
   res.writeHead(200, { 'content-type': TYPES['.js'], ...NO_STORE });
@@ -54,6 +68,7 @@ export function staticFrame(targetFile: string, o: Opts): http.Server {
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://frame');
     if (url.pathname === AGENT_PATH) return serveAgent(res, o.agentFile);
+    if (url.pathname.startsWith(FROZEN_PREFIX)) return serveFrozen(res, url.pathname, o);
     let file = url.pathname === '/' ? entry : resolveInside(root, url.pathname);
     if (!file) {
       res.writeHead(403).end('Forbidden');
@@ -93,6 +108,7 @@ export function proxyFrame(targetUrl: string, o: Opts & { frameOrigin: () => str
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://frame');
     if (url.pathname === AGENT_PATH) return serveAgent(res, o.agentFile);
+    if (url.pathname.startsWith(FROZEN_PREFIX)) return serveFrozen(res, url.pathname, o);
     const headers: http.OutgoingHttpHeaders = { ...req.headers, host: t.host, 'accept-encoding': 'identity' };
     if (headers.origin) headers.origin = t.origin;
     if (typeof headers.referer === 'string') headers.referer = headers.referer.replace(o.frameOrigin(), t.origin);

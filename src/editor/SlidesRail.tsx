@@ -16,7 +16,7 @@ export function SlidesRail() {
           const open = session.comments.filter((c) => c.slide === sl.id && c.status === 'open').length;
           const parentIndex = session.slides.findIndex((x) => x.id === sl.parent);
           return (
-            <li key={sl.id} className="slide" data-active={sl.id === current || undefined}>
+            <li key={sl.id} className="slide" data-active={sl.id === current || undefined} data-frozen={sl.frozen ? '' : undefined}>
               <button className="thumb" onClick={() => loadSlide(sl.id)} aria-label={`Open slide ${i + 1}, ${sl.label}`}>
                 <span className="num">{i + 1}</span>
                 {sl.thumb ? <img src={sl.thumb} alt="" /> : <span className="blank" />}
@@ -43,8 +43,12 @@ export function SlidesRail() {
                     {sl.label}
                   </span>
                 )}
-                <span className="sub" title={sl.url}>
-                  {sl.path.length ? `from ${parentIndex + 1} · ${sl.path.map((p) => p.text).join(' › ')}` : sl.url}
+                <span className="sub" title={sl.frozen ? sl.frozen.url : sl.url}>
+                  {sl.frozen
+                    ? `❄ frozen from ${parentIndex + 1} · ${new Date(sl.frozen.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                    : sl.path.length
+                      ? `from ${parentIndex + 1} · ${sl.path.map((p) => p.text).join(' › ')}`
+                      : sl.url}
                 </span>
               </div>
               <div className="slide-actions">

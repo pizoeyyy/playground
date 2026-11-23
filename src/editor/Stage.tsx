@@ -10,6 +10,7 @@ import {
   toAgent,
   DEVICE_WIDTH,
   getState,
+  loadSlide,
   setMode,
   focusComment,
   setIframe,
@@ -64,7 +65,31 @@ export function Stage() {
         </div>
       )}
       {scale < 1 && <div className="zoom">{Math.round(scale * 100)}%</div>}
+      <FrozenBanner />
     </main>
+  );
+}
+
+/** On a frozen copy: say what it is and offer the live page. */
+function FrozenBanner() {
+  const session = useStore((s) => s.session);
+  const current = useStore((s) => s.current);
+  const sl = session?.slides.find((x) => x.id === current);
+  if (!session || !sl?.frozen) return null;
+  const from = session.slides.findIndex((x) => x.id === sl.frozen!.from);
+  const when = new Date(sl.frozen.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return (
+    <div className="frozen-banner" role="status">
+      <span className="flake" aria-hidden>❄</span>
+      <span>
+        Frozen copy of slide {from + 1}, saved {when}. Comments here stay put. Clicks don't run anything.
+      </span>
+      {from >= 0 && (
+        <button className="ghost small" onClick={() => loadSlide(sl.frozen!.from)}>
+          Open live slide
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -97,7 +122,8 @@ function Overlay({ scale, width }: { scale: number; width: number }) {
   const comments = session?.comments ?? [];
   useEffect(() => syncPins(), [comments.length, current]);
 
-  const visible = comments.filter((c) => c.slide === current && c.status !== 'resolved');
+  // Pinned here, or made here and frozen: the live page shows it while its element is still there.
+  const visible = comments.filter((c) => (c.slide === current || c.live === current) && c.status !== 'resolved');
   const perSelector = new Map<string, number>();
   const inv = 1 / scale;
 
@@ -139,7 +165,7 @@ function Overlay({ scale, width }: { scale: number; width: number }) {
         (() => {
           const c = comments.find((x) => x.id === openThread);
           const r = c && rects[c.selector];
-          if (!c || !r || c.slide !== current) return null;
+          if (!c || !r || (c.slide !== current && c.live !== current)) return null;
           return (
             <Popover rect={r} scale={scale} width={width}>
               <Thread comment={c} n={comments.indexOf(c) + 1} />
